@@ -30,7 +30,7 @@ export type CaerusApi = SharedResourceApi
 export const PLANTILLAS = {
   butaca: process.env.CAERUS_TEMPLATE_BUTACA ?? 'butaca',
   butacaFila: process.env.CAERUS_TEMPLATE_BUTACA_FILA ?? 'butaca_fila',
-  capacidad: process.env.CAERUS_TEMPLATE_CAPACIDAD ?? 'funcion-capacidad',
+  capacidad: process.env.CAERUS_TEMPLATE_CAPACIDAD ?? 'funcion_capacidad',
   producto: process.env.CAERUS_TEMPLATE_PRODUCTO ?? 'producto',
 } as const
 
