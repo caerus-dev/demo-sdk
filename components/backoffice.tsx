@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { cabecerasBackoffice, fetcher, formatPrecio, guardarTokenBackoffice, tokenBackoffice } from '@/lib/client'
+import { cn } from '@/lib/utils'
 import type { FuncionDTO, HolderDTO, ProductoDTO } from '@/lib/cine'
 
 type Estado = HolderDTO['status']
@@ -72,6 +73,7 @@ function EstadoBadge({ estado }: { estado: Estado }) {
 }
 
 function BotonSoltarTodo({ alTerminar }: { alTerminar: () => void }) {
+  const bloqueado = useBloqueado()
   const [trabajando, setTrabajando] = useState(false)
   const [resultado, setResultado] = useState<string | null>(null)
 
@@ -99,7 +101,7 @@ function BotonSoltarTodo({ alTerminar }: { alTerminar: () => void }) {
       <button
         type="button"
         onClick={soltar}
-        disabled={trabajando}
+        disabled={trabajando || bloqueado}
         title="Libera todas las reservas en curso. No toca las compras confirmadas."
         className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:opacity-40"
       >
@@ -115,6 +117,7 @@ function BotonSoltarTodo({ alTerminar }: { alTerminar: () => void }) {
 }
 
 function FuncionesCargadas() {
+  const bloqueado = useBloqueado()
   const { data, mutate } = useSWR<{ funciones: FuncionDTO[] }>('/api/funciones', fetcher, {
     refreshInterval: 5000,
   })
@@ -163,7 +166,7 @@ function FuncionesCargadas() {
             <button
               type="button"
               onClick={() => eliminar(f.id, f.titulo)}
-              disabled={trabajando === f.id}
+              disabled={trabajando === f.id || bloqueado}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:opacity-40"
             >
               {trabajando === f.id ? (
@@ -181,6 +184,7 @@ function FuncionesCargadas() {
 }
 
 function StockCandy() {
+  const bloqueado = useBloqueado()
   const { data, mutate } = useSWR<{ productos: ProductoDTO[] }>('/api/productos', fetcher, {
     refreshInterval: 5000,
   })
@@ -224,7 +228,7 @@ function StockCandy() {
               <button
                 type="button"
                 onClick={() => reponer(p.key)}
-                disabled={trabajando === p.key}
+                disabled={trabajando === p.key || bloqueado}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary disabled:opacity-40"
               >
                 {trabajando === p.key ? (
@@ -242,18 +246,39 @@ function StockCandy() {
   )
 }
 
+function useBloqueado() {
+  const { data } = useSWR<{ protegido: boolean }>('/api/backoffice/estado', fetcher)
+  const [tiene, setTiene] = useState(false)
+
+  useEffect(() => {
+    setTiene(Boolean(tokenBackoffice()))
+    const t = setInterval(() => setTiene(Boolean(tokenBackoffice())), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  return Boolean(data?.protegido) && !tiene
+}
+
 function CampoToken() {
   const [valor, setValor] = useState('')
   const [guardado, setGuardado] = useState(false)
+  const bloqueado = useBloqueado()
 
   useEffect(() => {
     setValor(tokenBackoffice())
   }, [])
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
-      <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" />
-      <span className="text-muted-foreground">Token del Backoffice</span>
+    <div
+      className={cn(
+        'flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm',
+        bloqueado ? 'border-primary/40 bg-primary/10' : 'border-border bg-secondary/30',
+      )}
+    >
+      <KeyRound className={cn('size-4', bloqueado ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
+      <span className={bloqueado ? 'text-primary' : 'text-muted-foreground'}>
+        {bloqueado ? 'Solo lectura: cargá el token para poder modificar' : 'Token del Backoffice'}
+      </span>
       <input
         type="password"
         value={valor}
@@ -409,6 +434,7 @@ const inputClase =
   'w-full rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/60 focus:ring-2 focus:ring-primary/20'
 
 function FuncionForm() {
+  const bloqueado = useBloqueado()
   const [titulo, setTitulo] = useState('')
   const [horario, setHorario] = useState('')
   const [precioBase, setPrecioBase] = useState('')
@@ -486,7 +512,7 @@ function FuncionForm() {
       </div>
       <button
         type="submit"
-        disabled={estado === 'saving'}
+        disabled={estado === 'saving' || bloqueado}
         className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
       >
         {estado === 'saving' ? (
@@ -503,6 +529,7 @@ function FuncionForm() {
 }
 
 function ProductoForm() {
+  const bloqueado = useBloqueado()
   const [nombre, setNombre] = useState('')
   const [tamanio, setTamanio] = useState('')
   const [precio, setPrecio] = useState('')
@@ -593,7 +620,7 @@ function ProductoForm() {
       </div>
       <button
         type="submit"
-        disabled={estado === 'saving'}
+        disabled={estado === 'saving' || bloqueado}
         className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
       >
         {estado === 'saving' ? (
