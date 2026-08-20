@@ -18,6 +18,14 @@ idea central de la demo:
 Mismo código, dos comportamientos. La diferencia es un campo en una plantilla del
 dashboard, no una línea de esta app.
 
+## Publicada
+
+**https://caerus-demo.vercel.app** — repo `caerus-dev/demo-sdk`, cada push a `main` redeploya solo.
+
+Las variables de entorno viven en Vercel, no en el repo. El Backoffice queda en **solo
+lectura** salvo que cargues el token de `BACKOFFICE_TOKEN`: reservar y comprar están
+abiertos para cualquiera, modificar el inventario no.
+
 ## Levantarla
 
 ```bash
@@ -202,6 +210,21 @@ Es mantenimiento, no una operación que una app de verdad deba poder hacer con u
 
 Después de un `resembrar.mjs --borrar` **no hace falta reiniciar**: la app revalida el
 sembrado cada 30 segundos y vuelve a crear todo sola.
+
+## Lo que sabemos que falla
+
+Dos son del motor, no de esta app, y conviene saberlos antes de mostrarla.
+
+**No hagas reservar → quitar → reservar la misma butaca.** La idempotencia del motor
+devuelve el holder viejo, ya liberado: la pantalla la pinta como tuya y no lo es. Si querés
+mostrar el "quitar", después reservá **otra** butaca.
+
+**Si el dueño de una butaca la compra, el que estaba en la fila queda esperando para
+siempre.** Es correcto —la butaca se vendió, no hay nada que darle— pero si alguien se
+queda colgado en la demo, esa es la razón.
+
+Bajo ráfagas de muchos pedidos a la vez, los números de la cartelera pueden ir unos
+segundos atrasados respecto del motor. Se asientan solos.
 
 ## Detalles que importan
 
