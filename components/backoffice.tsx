@@ -84,9 +84,13 @@ function BotonSoltarTodo({ alTerminar }: { alTerminar: () => void }) {
       const res = await fetch('/api/backoffice/liberar-todo', { method: 'POST', headers: cabecerasBackoffice() })
       const datos = (await res.json().catch(() => null)) as { liberados?: number } | null
       setResultado(
-        res.ok && typeof datos?.liberados === 'number'
-          ? `${datos.liberados} reservas liberadas`
-          : 'No se pudo liberar',
+        res.status === 403
+          ? 'El token no coincide'
+          : res.ok && typeof datos?.liberados === 'number'
+            ? datos.liberados === 0
+              ? 'No habia reservas en curso'
+              : `${datos.liberados} reservas liberadas`
+            : 'No se pudo liberar',
       )
       alTerminar()
     } finally {
