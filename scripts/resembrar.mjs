@@ -54,12 +54,14 @@ try {
     process.exit(0)
   }
 
-  const { holders } = await c.listResourceHolders({ status: 'PENDING', pageSize: 300 })
   let sueltos = 0
-  for (const h of holders) {
-    try { await c.release(h.id); sueltos++ } catch {}
+  for (const status of ['PENDING', 'QUEUED']) {
+    const { holders } = await c.listResourceHolders({ status, pageSize: 300 })
+    for (const h of holders) {
+      try { await c.release(h.id); sueltos++ } catch {}
+    }
   }
-  console.log(`Holders pendientes liberados: ${sueltos}`)
+  console.log(`Holders vivos liberados: ${sueltos}`)
   await esperar(1500)
 
   const lista = [...claves]

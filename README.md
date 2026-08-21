@@ -187,7 +187,7 @@ Tres cosas además del alta de funciones y productos:
 |---|---|---|
 | **Funciones en cartelera** | Eliminar borra la capacidad y las 54 butacas | `deleteResource` |
 | **Stock del candy bar** | Reponer devuelve el stock al valor del catálogo | `updateResource` |
-| **Soltar reservas en curso** | Libera todos los holders `PENDING` de un saque | `release` |
+| **Soltar reservas en curso** | Libera de un saque los holders `PENDING` y los `QUEUED` | `release` |
 
 "Soltar reservas en curso" es el botón que vas a querer entre una demo y la siguiente. No
 toca las compras confirmadas: esas son terminales y el motor no tiene "descomprar".

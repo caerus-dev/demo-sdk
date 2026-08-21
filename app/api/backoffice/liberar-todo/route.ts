@@ -7,6 +7,8 @@ import { rechazoSiNoAutorizado } from '@/lib/backoffice-auth'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+const VIVOS = ['PENDING', 'QUEUED'] as const
+
 export async function POST(req: Request) {
   const rechazo = rechazoSiNoAutorizado(req)
   if (rechazo) return rechazo
@@ -16,7 +18,10 @@ export async function POST(req: Request) {
     await ensureSeed()
 
     const liberados = await conRegistro(llamadas, async () => {
-      const { holders } = await caerus.listResourceHolders({ status: 'PENDING', pageSize: 300 })
+      const paginas = await Promise.all(
+        VIVOS.map((status) => caerus.listResourceHolders({ status, pageSize: 300 })),
+      )
+      const holders = paginas.flatMap((p) => p.holders)
       const resultados = await Promise.allSettled(holders.map((h) => caerus.release(h.id)))
       return resultados.filter((r) => r.status === 'fulfilled').length
     })
