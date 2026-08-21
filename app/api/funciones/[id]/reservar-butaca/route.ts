@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { caerus, conRegistro, type LlamadaSDK } from '@/lib/caerus'
 import { ensureSeed, infoKey, meta } from '@/lib/cine'
-import { errorResponse, exigirHolderVivo } from '@/lib/api'
+import { errorResponse, esClaveValida, exigirHolderVivo } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,9 +16,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       sessionId?: string
       intento?: string
     }
-    if (!butacaKey || !sessionId) {
+    if (!esClaveValida(butacaKey) || !sessionId) {
       return NextResponse.json(
-        { code: 'VALIDATION', message: 'Faltan butacaKey o sessionId' },
+        { code: 'VALIDATION', message: 'Falta sessionId o la butacaKey no es válida' },
         { status: 400 },
       )
     }

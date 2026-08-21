@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { caerus, conRegistro, type LlamadaSDK } from '@/lib/caerus'
 import { ensureSeed, infoKey, meta } from '@/lib/cine'
-import { errorResponse, exigirHolderVivo } from '@/lib/api'
+import { errorResponse, esClaveValida, exigirHolderVivo } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

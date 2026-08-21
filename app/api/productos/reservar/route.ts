@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { caerus, conRegistro, type LlamadaSDK } from '@/lib/caerus'
 import { ensureSeed, meta } from '@/lib/cine'
-import { errorResponse } from '@/lib/api'
+import { errorResponse, esCantidadValida, esClaveValida } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       cantidad?: number
       sessionId?: string
     }
-    if (!productoKey || !sessionId || !cantidad || cantidad < 1) {
+    if (!esClaveValida(productoKey) || !sessionId || !esCantidadValida(cantidad)) {
       return NextResponse.json(
         { code: 'VALIDATION', message: 'Faltan datos o la cantidad es inválida' },
         { status: 400 },
