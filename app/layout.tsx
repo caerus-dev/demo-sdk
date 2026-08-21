@@ -11,7 +11,6 @@ export const metadata: Metadata = {
   title: 'Caerus Cine — demo de concurrencia',
   description:
     'Demo de cine que muestra reservas concurrentes: butacas que se toman por un rato, se liberan solas y entran en conflicto cuando dos personas quieren lo mismo.',
-  generator: 'v0.app',
 }
 
 export const viewport: Viewport = {
