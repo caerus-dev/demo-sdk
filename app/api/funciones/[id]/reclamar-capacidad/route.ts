@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { caerus, conRegistro, type LlamadaSDK } from '@/lib/caerus'
 import { ensureSeed, infoKey, meta } from '@/lib/cine'
-import { errorResponse } from '@/lib/api'
+import { errorResponse, exigirHolderVivo } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,10 +11,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     await ensureSeed()
     const { id } = await params
-    const { butacaHolderId, butacaKey, sessionId } = (await req.json()) as {
+    const { butacaHolderId, butacaKey, sessionId, intento } = (await req.json()) as {
       butacaHolderId?: string
       butacaKey?: string
       sessionId?: string
+      intento?: string
     }
     if (!butacaHolderId || !butacaKey || !sessionId) {
       return NextResponse.json(
@@ -30,10 +31,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
       try {
         const capacidadHolder = await caerus.pooled(infoKey(id)).takeMany(1, {
-          idempotencyKey: `${sessionId}:${infoKey(id)}:${butacaKey}`,
+          idempotencyKey: `${sessionId}:${infoKey(id)}:${butacaKey}:${intento ?? sessionId}`,
           ttlSeconds: 120,
           ...meta({ butacaKey, funcionId: id }),
         })
+        exigirHolderVivo(capacidadHolder, infoKey(id))
         return { estado: 'PENDING' as const, capacidadHolder, butacaHolder }
       } catch (error) {
         await caerus.release(butacaHolder.id).catch(() => {})

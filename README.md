@@ -213,12 +213,6 @@ sembrado cada 30 segundos y vuelve a crear todo sola.
 
 ## Lo que sabemos que falla
 
-Dos son del motor, no de esta app, y conviene saberlos antes de mostrarla.
-
-**No hagas reservar → quitar → reservar la misma butaca.** La idempotencia del motor
-devuelve el holder viejo, ya liberado: la pantalla la pinta como tuya y no lo es. Si querés
-mostrar el "quitar", después reservá **otra** butaca.
-
 **Si el dueño de una butaca la compra, el que estaba en la fila queda esperando para
 siempre.** Es correcto —la butaca se vendió, no hay nada que darle— pero si alguien se
 queda colgado en la demo, esa es la razón.
@@ -228,6 +222,19 @@ segundos atrasados respecto del motor. Se asientan solos.
 
 ## Detalles que importan
 
+- **La clave de idempotencia es por intento, no por butaca.** Se arma como
+  `sessionId:butacaKey:intento`, donde `intento` es un UUID que vive en `sessionStorage` y
+  se descarta al soltar la butaca o al vencerse. Así el doble clic sigue devolviendo el
+  mismo holder —que es para lo que existe la idempotencia— pero volver a pedir una butaca
+  que soltaste arranca una operación nueva. Con una clave fija por usuario y butaca, el
+  motor contestaba con el holder viejo ya liberado: correcto de su parte, y un error
+  nuestro por reusar una clave para otra cosa.
+- **Ninguna respuesta del motor se da por buena sin mirar el estado.** `exigirHolderVivo`
+  rechaza cualquier holder que no venga `PENDING` o `QUEUED`, así que un `200` con un
+  holder muerto se convierte en un `409` visible en vez de una reserva fantasma.
+- **El mapa revalida sus propias reservas cada cinco segundos** contra `/api/holders`. Si
+  un holder dejó de estar vigente —lo soltó el Backoffice, se venció, lo liberó otra
+  ventana— la butaca vuelve a estar libre en pantalla sola.
 - **`serverExternalPackages`** en `next.config.mjs`: `@grpc/grpc-js` no se puede
   empaquetar. Si se saca, todas las llamadas fallan.
 - **`export const runtime = 'nodejs'`** en cada Route Handler: gRPC necesita el runtime de

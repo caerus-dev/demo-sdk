@@ -128,3 +128,22 @@ export function limpiarReserva(funcionId: string): void {
   if (typeof window === 'undefined') return
   sessionStorage.removeItem(reservaKey(funcionId))
 }
+
+function intentoKey(funcionId: string, butacaKey: string): string {
+  return `caerus_intento_${funcionId}_${butacaKey}`
+}
+
+export function intentoDe(funcionId: string, butacaKey: string): string {
+  if (typeof window === 'undefined') return ''
+  const clave = intentoKey(funcionId, butacaKey)
+  const abierto = sessionStorage.getItem(clave)
+  if (abierto) return abierto
+  const nuevo = crypto.randomUUID()
+  sessionStorage.setItem(clave, nuevo)
+  return nuevo
+}
+
+export function cerrarIntento(funcionId: string, butacaKey: string): void {
+  if (typeof window === 'undefined') return
+  sessionStorage.removeItem(intentoKey(funcionId, butacaKey))
+}

@@ -6,10 +6,12 @@ import useSWR from 'swr'
 import { AlertTriangle, ArrowRight, Hourglass, Loader2 } from 'lucide-react'
 import { Countdown } from '@/components/countdown'
 import {
+  cerrarIntento,
   fetcher,
   formatPrecio,
   getSessionId,
   guardarReserva,
+  intentoDe,
   leerReserva,
   type ButacaEnFila,
   type ButacaReservada,
@@ -51,28 +53,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
   const [aviso, setAviso] = useState<string | null>(null)
   const [cargando, setCargando] = useState<string | null>(null)
   useEffect(() => {
-    const guardada = leerReserva(funcionId)
-    setReserva(guardada)
-    if (guardada.butacas.length === 0) return
-
-    let vigente = true
-    const ids = guardada.butacas.flatMap((b) => [b.butacaHolderId, b.capacidadHolderId])
-    fetch(`/api/holders?ids=${ids.join(',')}`)
-      .then((r) => r.json() as Promise<{ holders: { id: string; status: string }[] }>)
-      .then(({ holders }) => {
-        if (!vigente) return
-        const vivos = new Set(holders.filter((h) => h.status === 'PENDING').map((h) => h.id))
-        const butacas = guardada.butacas.filter((b) => vivos.has(b.butacaHolderId))
-        if (butacas.length === guardada.butacas.length) return
-        const next = { ...guardada, butacas }
-        setReserva(next)
-        guardarReserva(next)
-      })
-      .catch(() => {})
-
-    return () => {
-      vigente = false
-    }
+    setReserva(leerReserva(funcionId))
   }, [funcionId])
   useEffect(() => {
     if (!data?.butacas) return
@@ -106,6 +87,55 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     reservaRef.current = reserva
   }, [reserva])
 
+  useEffect(() => {
+    let vigente = true
+
+    async function revalidar() {
+      const actuales = reservaRef.current.butacas
+      if (actuales.length === 0) return
+
+      const ids = actuales
+        .flatMap((b) => [b.butacaHolderId, b.capacidadHolderId])
+        .filter(Boolean)
+      const res = await fetch(`/api/holders?ids=${ids.join(',')}`).catch(() => null)
+      if (!res || !vigente) return
+
+      const { holders } = (await res.json().catch(() => ({ holders: [] }))) as {
+        holders: { id: string; status: string }[]
+      }
+      const estadoPorId = new Map(holders.map((h) => [h.id, h.status]))
+      const previa = reservaRef.current
+      const muertas = previa.butacas.filter((b) => {
+        const estado = estadoPorId.get(b.butacaHolderId)
+        return estado !== undefined && estado !== 'PENDING'
+      })
+      if (muertas.length === 0) return
+
+      muertas.forEach((b) => cerrarIntento(funcionId, b.butacaKey))
+      const claves = new Set(muertas.map((b) => b.butacaKey))
+      const next = {
+        ...previa,
+        butacas: previa.butacas.filter((b) => !claves.has(b.butacaKey)),
+      }
+      reservaRef.current = next
+      setReserva(next)
+      guardarReserva(next)
+      setAviso(
+        muertas.length === 1
+          ? `La ${muertas[0]!.columna}${muertas[0]!.fila} ya no está reservada a tu nombre y volvió a estar libre.`
+          : 'Algunas de tus butacas ya no están reservadas y volvieron a estar libres.',
+      )
+      void mutate()
+    }
+
+    void revalidar()
+    const iv = setInterval(() => void revalidar(), 5000)
+    return () => {
+      vigente = false
+      clearInterval(iv)
+    }
+  }, [funcionId, mutate])
+
   const enFila = useMemo(() => reserva.enFila ?? [], [reserva])
 
   const enFilaSet = useMemo(() => new Set(enFila.map((b) => b.butacaKey)), [enFila])
@@ -136,6 +166,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
               butacaHolderId: espera.butacaHolderId,
               butacaKey: espera.butacaKey,
               sessionId: getSessionId(),
+              intento: intentoDe(funcionId, espera.butacaKey),
             }),
           }).catch(() => null)
           if (!reclamo || !vigente) return
@@ -170,6 +201,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
           continue
         }
         if (estado && estado !== 'QUEUED') {
+          cerrarIntento(funcionId, espera.butacaKey)
           const previa = reservaRef.current
           const next = {
             ...previa,
@@ -202,6 +234,9 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     const actuales = reservaRef.current.butacas
     const vivas = actuales.filter((b) => new Date(b.expiresAt).getTime() > ahora)
     if (vivas.length === actuales.length) return
+    actuales
+      .filter((b) => new Date(b.expiresAt).getTime() <= ahora)
+      .forEach((b) => cerrarIntento(funcionId, b.butacaKey))
 
     const next = { ...reservaRef.current, butacas: vivas }
     reservaRef.current = next
@@ -213,7 +248,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         : 'Se venció una de tus butacas y volvió a estar libre. Las demás siguen reservadas.',
     )
     void mutate()
-  }, [mutate])
+  }, [mutate, funcionId])
 
   async function reservar(butaca: ButacaDTO) {
     setAviso(null)
@@ -222,7 +257,11 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
       const res = await fetch(`/api/funciones/${funcionId}/reservar-butaca`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ butacaKey: butaca.key, sessionId: getSessionId() }),
+        body: JSON.stringify({
+          butacaKey: butaca.key,
+          sessionId: getSessionId(),
+          intento: intentoDe(funcionId, butaca.key),
+        }),
       })
 
       const json = (await res.json().catch(() => null)) as
@@ -282,6 +321,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     const target = reserva.butacas.find((b) => b.butacaKey === butacaKey)
     if (!target) return
     setCargando(butacaKey)
+    cerrarIntento(funcionId, butacaKey)
     persistir({
       ...reserva,
       butacas: reserva.butacas.filter((b) => b.butacaKey !== butacaKey),

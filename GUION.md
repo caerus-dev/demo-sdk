@@ -18,14 +18,15 @@ Abrí **dos ventanas** lado a lado, no dos pestañas de la misma. Izquierda "Ana
 Tené a mano el **panel de llamadas**, debajo del mapa. Es lo que convierte la demo en una
 demo del SDK y no de una app de cine.
 
-## Antes de mostrarla, dos trampas conocidas
-
-**No hagas reservar → quitar → reservar la misma butaca.** La idempotencia del motor te
-devuelve el holder viejo ya liberado y la pantalla la pinta como tuya sin serlo. Es un bug
-del motor, ya reportado. Si mostrás el "quitar", después reservá **otra** butaca.
+## Antes de mostrarla, una cosa a saber
 
 **Si el dueño compra la butaca, el de la fila queda esperando para siempre.** Es correcto
 —se vendió, no hay nada que darle— pero si alguien se queda colgado, esa es la razón.
+
+Reservar → quitar → reservar la misma butaca **ya se puede**. Antes rompía, y valía la pena
+entender por qué: mandábamos siempre la misma clave de idempotencia para ese usuario y esa
+butaca, así que al volver a pedirla el motor contestaba con el holder viejo, ya liberado.
+No era un defecto del motor sino nuestro, por reusar una clave para una operación distinta.
 
 ---
 
