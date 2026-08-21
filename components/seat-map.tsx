@@ -50,11 +50,23 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     productos: [],
   })
   const [conflictos, setConflictos] = useState<Set<string>>(new Set())
+  const [soltando, setSoltando] = useState<Set<string>>(new Set())
   const [aviso, setAviso] = useState<string | null>(null)
   const [cargando, setCargando] = useState<string | null>(null)
   useEffect(() => {
     setReserva(leerReserva(funcionId))
   }, [funcionId])
+  useEffect(() => {
+    if (!data?.butacas) return
+    setSoltando((prev) => {
+      if (prev.size === 0) return prev
+      const siguen = new Set(
+        [...prev].filter((key) => data.butacas.some((b) => b.key === key && !b.disponible)),
+      )
+      return siguen.size === prev.size ? prev : siguen
+    })
+  }, [data])
+
   useEffect(() => {
     if (!data?.butacas) return
     setConflictos((prev) => {
@@ -322,6 +334,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     if (!target) return
     setCargando(butacaKey)
     cerrarIntento(funcionId, butacaKey)
+    setSoltando((prev) => new Set(prev).add(butacaKey))
     persistir({
       ...reserva,
       butacas: reserva.butacas.filter((b) => b.butacaKey !== butacaKey),
@@ -335,6 +348,18 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         }),
       })
       publicar('quitar', await res.json().catch(() => null))
+      if (!res.ok) throw new Error('no se pudo soltar')
+    } catch {
+      setSoltando((prev) => {
+        const siguen = new Set(prev)
+        siguen.delete(butacaKey)
+        return siguen
+      })
+      const previa = reservaRef.current
+      if (!previa.butacas.some((b) => b.butacaKey === butacaKey)) {
+        persistir({ ...previa, butacas: [...previa.butacas, target] })
+      }
+      setAviso('No pudimos soltar esa butaca. Sigue siendo tuya.')
     } finally {
       setCargando(null)
       void mutate()
@@ -408,7 +433,11 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                 const isSel = seleccionadas.has(key)
                 const isFila = enFilaSet.has(key)
                 const isConflict = conflictos.has(key)
-                const ocupada = !isSel && !isFila && (isConflict || (butaca ? !butaca.disponible : false))
+                const ocupada =
+                  !isSel &&
+                  !isFila &&
+                  !soltando.has(key) &&
+                  (isConflict || (butaca ? !butaca.disponible : false))
                 const isLoading = cargando === key
 
                 let fill = 'var(--secondary)'
