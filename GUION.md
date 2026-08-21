@@ -120,23 +120,60 @@ el nombre del comprador que guardó el motor en la metadata del holder.
 
 ## Si abrís el código
 
-Cuatro archivos, en este orden. Cinco minutos.
+Dos recorridos: la app que consume, y la biblioteca que escribimos. Cinco minutos cada uno.
+Los números de línea son de esta versión.
 
-**1. `lib/caerus/index.ts`** — Acá se instancia el SDK: `new CaerusClient({ apiKey, endpoint })`.
-Y el mismo tipo `SharedResourceApi` lo implementa también el motor en memoria.
-*El punto:* la app no sabe contra cuál de los dos está corriendo.
+### La app
 
-**2. `app/api/funciones/[id]/reservar-butaca/route.ts`** — El corazón. Entra en una pantalla
-y tiene toda la historia: los dos `take`, la compensación si el segundo falla, y el manejo
-de `QUEUED`. *El punto:* nunca se pregunta si hay lugar. Se pide, y el motor contesta.
+**1. `lib/caerus/index.ts:43-53`** — Acá se instancia el SDK. Sin API Key devuelve el motor
+en memoria, y los dos implementan `SharedResourceApi`.
+*El punto:* la app no sabe contra cuál de los dos corre.
 
-**3. `lib/caerus/registro.ts`** — El Proxy que alimenta el panel. *El punto:* el panel no
-puede mentir, porque intercepta las llamadas de verdad; no son `console.log` puestos a mano.
+**2. `app/api/funciones/[id]/reservar-butaca/route.ts:26-50`** — El corazón, entra en una
+pantalla: los dos `take`, la compensación cuando el segundo falla, y el manejo de `QUEUED`.
+*El punto:* nunca se pregunta si hay lugar. Se pide, y el motor contesta.
 
-**4. `app/api/holders/confirmar/route.ts`** — Revisa que todas las reservas sigan vivas
-antes de confirmar una sola. *El punto:* confirmar es irreversible, así que el orden importa.
+**3. `lib/api.ts:5-20`** — `exigirHolderVivo`. Ninguna respuesta se da por buena sin mirar
+el estado. *El punto:* un `200` puede traer un holder muerto, y eso no es un error del
+motor sino el contrato de idempotencia.
 
-No abras `lib/cine.ts` (es catálogo, largo) ni los componentes de React (no tienen Caerus).
+**4. `lib/client.ts:132-149`** — La clave de idempotencia es por **intento**: un UUID que
+vive en `sessionStorage` y se descarta al soltar la butaca. *El punto:* el doble clic
+sigue siendo idempotente, pero volver a pedir una butaca que soltaste es una operación
+nueva.
+
+**5. `lib/caerus/registro.ts:73-96`** — El Proxy que alimenta el panel. *El punto:* el
+panel no puede mentir; intercepta las llamadas de verdad, no son `console.log` a mano.
+
+**6. `app/api/holders/confirmar/route.ts:29-47`** — Revisa que todas las reservas sigan
+vivas antes de confirmar una sola. *El punto:* confirmar es irreversible.
+
+No abras `lib/cine.ts` (catálogo, largo) ni los componentes de React salvo que te pregunten
+por la pantalla.
+
+### El SDK
+
+**1. `src/internal/handles.ts:21-42`** — `unitaryHandle` no tiene `takeMany`; `pooledHandle`
+sí. *El punto:* la diferencia entre unitario y múltiple la sostiene el tipo, no un chequeo
+en tiempo de ejecución.
+
+**2. `src/client.ts:214-236`** — El `take` privado que usan los dos handles, y la guarda al
+final. *El punto:* una sola implementación, dos superficies.
+
+**3. `src/internal/mapping.ts:170-178`** — `assertUsable`, con los estados válidos pasados
+por llamada. *El punto:* un holder `CONFIRMED` es el resultado esperado de `confirm` y un
+fracaso viniendo de `take`, así que no puede haber una lista única.
+
+**4. `src/internal/mapping.ts:66-78`** — Las fechas. `expiresAt` viene en segundos y
+`createdAt` en milisegundos, y un cero se devuelve como `undefined`. *El punto:* la
+conversión ocurre una vez, acá, y nunca se convierte un dato ausente en enero de 1970.
+
+**5. `src/errors.ts:88-110`** — El mapeo de estados gRPC a errores tipados. *El punto:*
+quien usa la biblioteca hace `catch (ConflictError)`, no compara números de estado.
+
+**6. `src/internal/transport.ts:60-70`** — La API Key viaja en la metadata y cada llamada
+lleva su propio deadline. *El punto:* el SDK nunca reintenta solo; para eso están las
+claves de idempotencia.
 
 ---
 
