@@ -17,16 +17,28 @@ export async function POST(req: Request) {
   try {
     await ensureSeed()
 
-    const liberados = await conRegistro(llamadas, async () => {
+    const resumen = await conRegistro(llamadas, async () => {
       const paginas = await Promise.all(
         VIVOS.map((status) => caerus.listResourceHolders({ status, pageSize: 300 })),
       )
       const holders = paginas.flatMap((p) => p.holders)
       const resultados = await Promise.allSettled(holders.map((h) => caerus.release(h.id)))
-      return resultados.filter((r) => r.status === 'fulfilled').length
+      return {
+        encontrados: holders.length,
+        liberados: resultados.filter((r) => r.status === 'fulfilled').length,
+      }
     })
 
-    return NextResponse.json({ liberados, _llamadas: llamadas })
+    const fallidos = resumen.encontrados - resumen.liberados
+
+    return NextResponse.json({
+      ...resumen,
+      fallidos,
+      aviso: fallidos
+        ? `${fallidos} de ${resumen.encontrados} figuran vigentes en el listado pero el motor ya no los tiene así: la vista persistida quedó atrasada.`
+        : undefined,
+      _llamadas: llamadas,
+    })
   } catch (error) {
     return errorResponse(error, llamadas)
   }
