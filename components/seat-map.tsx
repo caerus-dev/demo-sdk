@@ -89,14 +89,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     return m
   }, [data])
 
-  const zonaPremium = useMemo(() => {
-    const premium = data?.butacas.filter((b) => b.tipo === 'Premium') ?? []
-    if (premium.length === 0) return null
-    const desde = Math.min(...premium.map((b) => b.fila))
-    if (ROWS.indexOf(desde) <= 0) return null
-    return { desde, precio: premium[0]!.precio }
-  }, [data])
-
   const persistir = useCallback((next: ReservaSesion) => {
     setReserva(next)
     guardarReserva(next)
@@ -204,7 +196,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
             fila: espera.fila,
             columna: espera.columna,
             precio: espera.precio,
-            tipo: espera.tipo,
             expiresAt: datos.expiresAt!,
           }
           const previa = reservaRef.current
@@ -310,7 +301,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
           fila: butaca.fila,
           columna: butaca.columna,
           precio: butaca.precio,
-          tipo: butaca.tipo,
         }
         persistir({ ...reserva, enFila: [...(reserva.enFila ?? []), enEspera] })
         setAviso('Esa butaca está tomada. Quedaste en la fila: si no la pagan, es tuya.')
@@ -325,7 +315,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         fila: butaca.fila,
         columna: butaca.columna,
         precio: butaca.precio,
-        tipo: butaca.tipo,
         expiresAt: json.expiresAt!,
       }
       persistir({ ...reserva, butacas: [...reserva.butacas, nueva] })
@@ -431,44 +420,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                 {c}
               </text>
             ))}
-            {zonaPremium ? (
-              (() => {
-                const y = PAD_TOP + ROWS.indexOf(zonaPremium.desde) * (SEAT + GAP) - GAP / 2
-                const etiqueta = `PREMIUM · ${formatPrecio(zonaPremium.precio)}`
-                const ancho = etiqueta.length * 5.6 + 14
-                return (
-                  <g aria-hidden="true">
-                    <line
-                      x1={PAD_X}
-                      y1={y}
-                      x2={VIEW_W - PAD_X}
-                      y2={y}
-                      stroke="var(--primary)"
-                      strokeWidth={1}
-                      strokeDasharray="3 4"
-                      opacity={0.45}
-                    />
-                    <rect
-                      x={VIEW_W / 2 - ancho / 2}
-                      y={y - 7}
-                      width={ancho}
-                      height={14}
-                      rx={7}
-                      fill="var(--card)"
-                    />
-                    <text
-                      x={VIEW_W / 2}
-                      y={y + 3.5}
-                      textAnchor="middle"
-                      className="fill-primary"
-                      style={{ fontSize: 9, letterSpacing: 1 }}
-                    >
-                      {etiqueta}
-                    </text>
-                  </g>
-                )
-              })()
-            ) : null}
             {ROWS.map((r, ri) =>
               COLS.map((c, ci) => {
                 const key = `funcion${funcionId}_${c}${r}`
@@ -501,7 +452,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                 return (
                   <g key={key}>
                     {butaca ? (
-                      <title>{`${c}${r} · ${butaca.tipo} · ${formatPrecio(butaca.precio)}`}</title>
+                      <title>{`${c}${r} · ${formatPrecio(butaca.precio)}`}</title>
                     ) : null}
                     <rect
                       x={x}
@@ -562,12 +513,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
             <Legend swatch="bg-primary border-primary" label="Tu selección" />
             <Legend swatch="border-destructive/50 bg-destructive/20" label="Ocupada" />
             <Legend swatch="border-status-queued bg-status-queued/25 border-dashed" label="En la fila" />
-            {zonaPremium ? (
-              <span className="flex items-center gap-2">
-                <span className="h-0 w-3.5 border-t border-dashed border-primary/60" />
-                Debajo de la línea, {formatPrecio(zonaPremium.precio)}
-              </span>
-            ) : null}
           </div>
         </div>
       </div>
@@ -622,7 +567,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                           {b.columna}
                           {b.fila}
                         </span>
-                        <span className="text-muted-foreground">{b.tipo}</span>
                       </span>
                       <span className="flex items-center gap-3">
                         <span className="font-medium text-foreground">

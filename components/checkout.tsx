@@ -327,7 +327,6 @@ export function Checkout({ funcionId }: { funcionId: string }) {
                         {b.columna}
                         {b.fila}
                       </span>
-                      <span className="text-muted-foreground">Butaca {b.tipo}</span>
                     </span>
                     <span className="font-medium text-foreground">{formatPrecio(b.precio)}</span>
                   </li>

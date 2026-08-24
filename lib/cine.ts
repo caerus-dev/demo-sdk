@@ -104,14 +104,6 @@ function parseButacaKey(key: string): { idFuncion: string; columna: string; fila
   return m ? { idFuncion: m[1]!, columna: m[2]!, fila: Number(m[3]) } : null
 }
 
-function tipoDeFila(fila: number): 'Estándar' | 'Premium' {
-  return fila >= 7 ? 'Premium' : 'Estándar'
-}
-
-function precioDeButaca(precioBase: number, fila: number): number {
-  return tipoDeFila(fila) === 'Premium' ? Math.round(precioBase * 1.5) : precioBase
-}
-
 
 async function existe(key: string): Promise<boolean> {
   try {
@@ -194,8 +186,7 @@ export async function crearFuncion(
         ...meta({
           fila,
           columna,
-          precio: precioDeButaca(input.precioBase, fila),
-          tipo: tipoDeFila(fila),
+          precio: input.precioBase,
         }),
       }),
     ),
@@ -294,7 +285,6 @@ export interface ButacaDTO {
   fila: number
   columna: string
   precio: number
-  tipo: string
   disponible: boolean
 }
 
@@ -307,8 +297,7 @@ export function butacaFromResource(r: Resource): ButacaDTO {
     key: r.key,
     fila,
     columna: String(m.columna ?? p?.columna ?? ''),
-    precio: Number(m.precio ?? precioDeButaca(precioBase, fila)),
-    tipo: String(m.tipo ?? tipoDeFila(fila)),
+    precio: Number(m.precio ?? precioBase),
     disponible: r.availableAmount > 0,
   }
 }

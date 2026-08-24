@@ -75,7 +75,6 @@ export interface ButacaReservada {
   fila: number
   columna: string
   precio: number
-  tipo: string
   expiresAt: string
 }
 
@@ -95,7 +94,6 @@ export interface ButacaEnFila {
   fila: number
   columna: string
   precio: number
-  tipo: string
 }
 
 export interface ReservaSesion {
