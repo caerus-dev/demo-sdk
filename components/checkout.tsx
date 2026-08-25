@@ -6,10 +6,12 @@ import useSWR from 'swr'
 import { AlertTriangle, CheckCircle2, Loader2, Minus, Plus, Popcorn, TimerReset, X } from 'lucide-react'
 import { Countdown } from '@/components/countdown'
 import {
+  cerrarIntento,
   fetcher,
   formatPrecio,
   getSessionId,
   guardarReserva,
+  intentoDe,
   leerReserva,
   limpiarReserva,
   type ProductoReservado,
@@ -41,9 +43,17 @@ export function Checkout({ funcionId }: { funcionId: string }) {
     setReserva(leerReserva(funcionId))
   }, [funcionId])
 
-  const persistir = useCallback((next: ReservaSesion) => {
+  const reservaRef = useRef(reserva)
+  useEffect(() => {
+    reservaRef.current = reserva
+  }, [reserva])
+
+  const persistir = useCallback((actualizar: (previa: ReservaSesion) => ReservaSesion) => {
+    const next = actualizar(reservaRef.current)
+    reservaRef.current = next
     setReserva(next)
     guardarReserva(next)
+    return next
   }, [])
 
   const productosEnCarro = useMemo(
@@ -119,6 +129,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
           productoKey: producto.key,
           cantidad,
           sessionId: getSessionId(),
+          intento: intentoDe(funcionId, producto.key),
         }),
       })
 
@@ -143,7 +154,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         cantidad: json.cantidad,
         expiresAt: json.expiresAt,
       }
-      persistir({ ...reserva, productos: [...reserva.productos, nuevo] })
+      persistir((previa) => ({ ...previa, productos: [...previa.productos, nuevo] }))
     } catch {
       setAviso('No pudimos agregar el producto. Revisá tu conexión.')
     } finally {
@@ -153,10 +164,11 @@ export function Checkout({ funcionId }: { funcionId: string }) {
 
   async function quitarProducto(p: ProductoReservado) {
     setTrabajando(p.productoKey)
-    persistir({
-      ...reserva,
-      productos: reserva.productos.filter((x) => x.productoKey !== p.productoKey),
-    })
+    cerrarIntento(funcionId, p.productoKey)
+    persistir((previa) => ({
+      ...previa,
+      productos: previa.productos.filter((x) => x.productoKey !== p.productoKey),
+    }))
     try {
       const res = await fetch('/api/holders/liberar', {
         method: 'POST',
@@ -202,21 +214,18 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         return
       }
 
-      const extra = 120_000
-      const next: ReservaSesion = {
-        ...reserva,
-        butacas: reserva.butacas.map((b) => ({
-          ...b,
-          expiresAt: new Date(new Date(b.expiresAt).getTime() + extra).toISOString(),
-        })),
-        productos: reserva.productos.map((p) => ({
-          ...p,
-          expiresAt: new Date(new Date(p.expiresAt).getTime() + extra).toISOString(),
-        })),
-      }
+      const vence = datos.expiresAt
       expirado.current = false
-      persistir(next)
-      setAviso('Listo, tenés dos minutos más.')
+      persistir((previa) => ({
+        ...previa,
+        butacas: previa.butacas.map((b) => ({ ...b, expiresAt: vence })),
+        productos: previa.productos.map((p) => ({ ...p, expiresAt: vence })),
+      }))
+      setAviso(
+        datos.extendidos === holderIds.length
+          ? 'Listo, tenés dos minutos más.'
+          : 'Te dimos más tiempo, pero alguna de tus reservas ya no estaba vigente.',
+      )
     } finally {
       setTrabajando(null)
     }

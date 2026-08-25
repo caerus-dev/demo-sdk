@@ -89,15 +89,18 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     return m
   }, [data])
 
-  const persistir = useCallback((next: ReservaSesion) => {
-    setReserva(next)
-    guardarReserva(next)
-  }, [])
-
   const reservaRef = useRef(reserva)
   useEffect(() => {
     reservaRef.current = reserva
   }, [reserva])
+
+  const persistir = useCallback((actualizar: (previa: ReservaSesion) => ReservaSesion) => {
+    const next = actualizar(reservaRef.current)
+    reservaRef.current = next
+    setReserva(next)
+    guardarReserva(next)
+    return next
+  }, [])
 
   useEffect(() => {
     let vigente = true
@@ -302,7 +305,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
           columna: butaca.columna,
           precio: butaca.precio,
         }
-        persistir({ ...reserva, enFila: [...(reserva.enFila ?? []), enEspera] })
+        persistir((previa) => ({ ...previa, enFila: [...(previa.enFila ?? []), enEspera] }))
         setAviso('Esa butaca está tomada. Quedaste en la fila: si no la pagan, es tuya.')
         void mutate()
         return
@@ -317,7 +320,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         precio: butaca.precio,
         expiresAt: json.expiresAt!,
       }
-      persistir({ ...reserva, butacas: [...reserva.butacas, nueva] })
+      persistir((previa) => ({ ...previa, butacas: [...previa.butacas, nueva] }))
       void mutate()
     } catch {
       setAviso('No pudimos reservar la butaca. Revisá tu conexión.')
@@ -327,15 +330,15 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
   }
 
   async function liberar(butacaKey: string) {
-    const target = reserva.butacas.find((b) => b.butacaKey === butacaKey)
+    const target = reservaRef.current.butacas.find((b) => b.butacaKey === butacaKey)
     if (!target) return
     setCargando(butacaKey)
     cerrarIntento(funcionId, butacaKey)
     setSoltando((prev) => new Set(prev).add(butacaKey))
-    persistir({
-      ...reserva,
-      butacas: reserva.butacas.filter((b) => b.butacaKey !== butacaKey),
-    })
+    persistir((previa) => ({
+      ...previa,
+      butacas: previa.butacas.filter((b) => b.butacaKey !== butacaKey),
+    }))
     try {
       const res = await fetch('/api/holders/liberar', {
         method: 'POST',
@@ -352,10 +355,11 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         siguen.delete(butacaKey)
         return siguen
       })
-      const previa = reservaRef.current
-      if (!previa.butacas.some((b) => b.butacaKey === butacaKey)) {
-        persistir({ ...previa, butacas: [...previa.butacas, target] })
-      }
+      persistir((previa) =>
+        previa.butacas.some((b) => b.butacaKey === butacaKey)
+          ? previa
+          : { ...previa, butacas: [...previa.butacas, target] },
+      )
       setAviso('No pudimos soltar esa butaca. Sigue siendo tuya.')
     } finally {
       setCargando(null)

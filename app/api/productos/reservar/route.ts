@@ -10,10 +10,11 @@ export async function POST(req: Request) {
   const llamadas: LlamadaSDK[] = []
   try {
     await ensureSeed()
-    const { productoKey, cantidad, sessionId } = (await req.json()) as {
+    const { productoKey, cantidad, sessionId, intento } = (await req.json()) as {
       productoKey?: string
       cantidad?: number
       sessionId?: string
+      intento?: string
     }
     if (!esClaveValida(productoKey) || !sessionId || !esCantidadValida(cantidad)) {
       return NextResponse.json(
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
 
     const holder = await conRegistro(llamadas, () =>
       caerus.pooled(productoKey).takeMany(cantidad, {
-        idempotencyKey: `${sessionId}:${productoKey}:${cantidad}`,
+        idempotencyKey: `${sessionId}:${productoKey}:${cantidad}:${intento ?? sessionId}`,
         ttlSeconds: 120,
         ...meta({ productoKey, cantidad }),
       }),

@@ -36,11 +36,16 @@ export async function POST(req: Request) {
 
     const caidos = estados.filter((e) => e.status !== 'PENDING')
     if (caidos.length > 0) {
+      const vivos = estados.filter((e) => e.status === 'PENDING').map((e) => e.id)
+      await conRegistro(llamadas, () =>
+        Promise.allSettled(vivos.map((id) => caerus.release(id))),
+      )
       return NextResponse.json(
         {
           code: 'CONFLICT',
           message: 'Alguna de tus reservas ya no está vigente',
           vencidos: caidos.map((e) => e.id),
+          liberados: vivos.length,
           confirmados: 0,
           _llamadas: llamadas,
         },
@@ -59,6 +64,9 @@ export async function POST(req: Request) {
     const confirmados = holderIds.filter((_, i) => resultados[i]!.status === 'fulfilled')
     const fallidos = holderIds.filter((_, i) => resultados[i]!.status === 'rejected')
     if (fallidos.length > 0) {
+      await conRegistro(llamadas, () =>
+        Promise.allSettled(fallidos.map((id) => caerus.release(id))),
+      )
       return NextResponse.json(
         {
           code: 'CONFLICT',
