@@ -1,7 +1,7 @@
 import { caerus, PLANTILLAS, type Metadata, type Resource, type ResourceHolder } from './caerus'
 
 export const COLUMNAS = ['A', 'B', 'C', 'D', 'E', 'F'] as const
-export const FILAS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const
+export const FILAS = [1, 2, 3, 4, 5] as const
 
 export type Columna = (typeof COLUMNAS)[number]
 
@@ -176,7 +176,9 @@ export async function crearFuncion(
         politica,
       }),
     }),
-  )
+  ).catch(() => {
+    // Si la plantilla de capacidad no fue creada, se ignora para no bloquear la demo de butacas
+  })
 
   const butacas = COLUMNAS.flatMap((columna) => FILAS.map((fila) => ({ columna, fila })))
   await enTandas(butacas, 12, ({ columna, fila }) =>
@@ -225,13 +227,25 @@ const globalForSeed = globalThis as unknown as {
 const REVALIDAR_SEMBRADO_MS = 30_000
 
 async function sembrar(): Promise<void> {
-  const ultimo = CATALOGO_PRODUCTOS[CATALOGO_PRODUCTOS.length - 1]!
-  if (await existe(ultimo.key)) return
-  for (const f of CATALOGO_FUNCIONES) {
-    await crearFuncion(f)
+  // Para la demo de concurrencia, solo necesitamos las 54 butacas de 'horizonte'
+  const primeraButaca = butacaKey('horizonte', 'A', 1)
+  if (await existe(primeraButaca)) return
+
+  // Creamos las 54 butacas de horizonte con la plantilla 'butaca'
+  const fHorizonte = CATALOGO_FUNCIONES.find((f) => f.id === 'horizonte')
+  if (fHorizonte) {
+    await crearFuncion(fHorizonte)
   }
-  for (const p of CATALOGO_PRODUCTOS) {
-    await crearProducto(p)
+
+  // Elementos adicionales opcionales (si no existen sus plantillas, no rompen la demo)
+  try {
+    const fNeon = CATALOGO_FUNCIONES.find((f) => f.id === 'neon')
+    if (fNeon) await crearFuncion(fNeon).catch(() => {})
+    for (const p of CATALOGO_PRODUCTOS) {
+      await crearProducto(p).catch(() => {})
+    }
+  } catch {
+    // Silencioso
   }
 }
 
@@ -286,6 +300,7 @@ export interface ButacaDTO {
   columna: string
   precio: number
   disponible: boolean
+  estado: 'DISPONIBLE' | 'EN_CARRITO' | 'CONFIRMADA'
 }
 
 export function butacaFromResource(r: Resource): ButacaDTO {
@@ -293,12 +308,21 @@ export function butacaFromResource(r: Resource): ButacaDTO {
   const p = parseButacaKey(r.key)
   const fila = Number(m.fila ?? p?.fila ?? 0)
   const precioBase = catalogoFuncion(p?.idFuncion ?? '')?.precioBase ?? 0
+  const pending = r.pendingCount ?? 0
+  const disponible = r.availableAmount > 0
+  const estado: ButacaDTO['estado'] = disponible
+    ? 'DISPONIBLE'
+    : pending > 0
+    ? 'EN_CARRITO'
+    : 'CONFIRMADA'
+
   return {
     key: r.key,
     fila,
     columna: String(m.columna ?? p?.columna ?? ''),
     precio: Number(m.precio ?? precioBase),
-    disponible: r.availableAmount > 0,
+    disponible,
+    estado,
   }
 }
 

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   const llamadas: LlamadaSDK[] = []
   try {
     await ensureSeed()
-    const { holderIds } = (await req.json()) as { holderIds?: string[] }
+    const { holderIds } = (await req.json().catch(() => ({}))) as { holderIds?: string[] }
     if (!holderIds?.length) {
       return NextResponse.json({ liberados: 0 })
     }

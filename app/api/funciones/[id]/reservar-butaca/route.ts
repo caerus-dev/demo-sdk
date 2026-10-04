@@ -23,34 +23,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       )
     }
 
-    const sufijo = intento ?? sessionId
+    const sufijo = intento ?? crypto.randomUUID()
+
+    const ttlSeconds = Number(process.env.CAERUS_TTL_SECONDS) || 30
 
     const resultado = await conRegistro(llamadas, async () => {
       const butacaHolder = await caerus.unitary(butacaKey).take({
         idempotencyKey: `${sessionId}:${butacaKey}:${sufijo}`,
-        ttlSeconds: 120,
+        ttlSeconds,
         ...meta({ butacaKey, funcionId: id }),
       })
       exigirHolderVivo(butacaHolder, butacaKey)
-      if (butacaHolder.status === 'QUEUED') {
-        return { butacaHolder, capacidadHolder: null }
-      }
-      try {
-        const capacidadHolder = await caerus.pooled(infoKey(id)).takeMany(1, {
-          idempotencyKey: `${sessionId}:${infoKey(id)}:${butacaKey}:${sufijo}`,
-          ttlSeconds: 120,
-          ...meta({ butacaKey, funcionId: id }),
-        })
-        exigirHolderVivo(capacidadHolder, infoKey(id))
-        return { butacaHolder, capacidadHolder }
-      } catch (error) {
-        await caerus.release(butacaHolder.id).catch(() => {})
-        throw error
-      }
+      return { butacaHolder }
     })
 
-    const { butacaHolder, capacidadHolder } = resultado
-    if (!capacidadHolder) {
+    const { butacaHolder } = resultado
+    if (butacaHolder.status === 'QUEUED') {
       return NextResponse.json({
         butacaKey,
         estado: 'EN_FILA',
@@ -62,7 +50,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       butacaKey,
       estado: 'RESERVADA',
       butacaHolderId: butacaHolder.id,
-      capacidadHolderId: capacidadHolder.id,
       expiresAt: butacaHolder.expiresAt.toISOString(),
       _llamadas: llamadas,
     })

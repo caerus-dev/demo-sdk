@@ -55,6 +55,96 @@ realmente se ejecuta, y una llamada nueva aparece sola.
 Solo registra **acciones del usuario** —reservar, quitar, candy bar, pagar, cancelar—. Las
 consultas del refresco automático corren cada 3 segundos y ahogarían el panel.
 
+## Demostración de Concurrencia (Antes / Después)
+
+La aplicación incluye una experiencia interactiva para comparar el comportamiento de un sistema tradicional versus Caerus, accesible directamente en:
+
+👉 **`/demo`** (o haciendo clic en **"Demo Concurrencia"** en la barra de navegación)
+
+Permite visualizar la diferencia **desde un solo navegador y con un solo clic**:
+
+1. **Sin Caerus (`/demo/broken`)**: Simula un backend tradicional. Al hacer clic en **"Simular 20 Compradores Simultáneos"**, se visualizan en tiempo real las colisiones de concurrencia: butacas con sobreventa (duplicadas en rojo), clientes con la misma entrada y butacas retenidas por carritos abandonados.
+2. **Con Caerus (`/demo/fixed`)**: La misma sala y la misma ráfaga de compradores, pero con control de concurrencia en tiempo real provisto por Caerus. Se demuestra 0% de sobreventa, exclusividad inmediata por comprador y expiración automática sin procesos manuales.
+3. **Simplificación de Lógica**: Muestra cómo se reemplazan bloqueos manuales complejos por una sola llamada declarativa al SDK de Caerus.
+
+---
+
+## Guía Rápida: Setup Mínimo en la Plataforma Web Caerus (Solo para Demo Concurrencia)
+
+Para probar únicamente la solución con Caerus (`/demo/fixed`) **sin configurar la cartelera original ni funciones extras**, solo necesitás hacer estos pasos indispensables en la plataforma web:
+
+### 1. Crear la Aplicación
+1. Entrá al portal de Caerus (`caerus-fe`).
+2. En el Dashboard, creá una aplicación (ej: `Caerus Cine`).
+3. Seleccioná el ambiente (ej: `dev`).
+
+### 2. Crear 1 sola Plantilla SRE (`butaca`)
+En la solapa **Recursos Compartidos (SRE)**, creá una única plantilla con estos valores:
+* **Nombre de la plantilla:** `butaca`
+* **Tipo:** **Unitaria**
+* **Resolución de conflicto:** **`FAIL`**
+* **Guardar Metadata:** **Sí** (activado)
+* **Idempotencia:** **Opcional / No**
+* **TTL por defecto:** `30` (o `120`) segundos
+
+*(No hace falta crear `funcion_capacidad`, `butaca_fila`, ni `producto`. Tampoco hace falta crear butacas a mano: la app las siembra sola al abrir la demo)*.
+
+### 3. Generar una API Key
+1. En la solapa **API Keys**, hacé clic en **"Crear API Key"**.
+2. Copiá el secret que aparece en pantalla (`caer_dev_...`).
+
+### 4. Crear el Webhook (Obligatorio para la Arquitectura Asíncrona)
+Para conectar el ciclo de vida de Caerus con tu backend y demostrar la reactividad ante abandono de carritos:
+1. En el menú lateral, andá a **Webhooks** y hacé clic en **"Crear Webhook"**.
+2. Completá el formulario con estos datos:
+   * **URL:** `https://tu-dominio-ngrok.ngrok-free.app/api/webhooks/caerus`
+   * **Descripción:** `Cine Webhook - Eventos de Reserva y Expiración`
+   * **Eventos a suscribir (Seleccionar):**
+     * 🚨 **`resource.expired`** (Indispensable: avisa cuando el carrito vence a los 30s)
+     * **`resource.taken`** (Avisa cuando una butaca entra en carrito)
+     * **`resource.released`** (Avisa cuando una butaca se libera)
+     * **`resource.confirmed`** (Avisa cuando la compra se confirma)
+3. Guardá el webhook.
+4. *(Opcional)* Si la plataforma te entrega un secreto de firma (`whsec_...`), podés guardarlo en tu `.env.local` como `CAERUS_WEBHOOK_SECRET`.
+
+> 💡 **Justificación para el Sprint Review:**  
+> En una solución empresarial real, cuando un comprador abandona el carrito no basta con que el asiento se libere en memoria; los demás microservicios de la empresa (pagos, CRM para envío de email de carrito abandonado, analítica) necesitan enterarse de inmediato. Caerus lo resuelve notificando automáticamente a este Webhook. La demo incluye un panel visual que muestra los webhooks recibidos en tiempo real.
+
+### 5. Control en Vivo desde el Telemetry Dashboard
+* **Liberación Manual en Vivo:** Si durante la demo hacés un `release` manual de un holder desde el Dashboard de Telemetría de Caerus, el cambio se refleja **en menos de 3 segundos en la pantalla del cine**: la butaca se libera sola y vuelve a estar disponible sin recargar la página.
+
+### 6. Configurar el archivo `.env.local`
+Creá un archivo `.env.local` en la raíz de `demo-sdk` con las credenciales obtenidas:
+
+```env
+# Conexión gRPC al motor de Caerus (Data Plane)
+CAERUS_ENDPOINT=grpc.caerus.dev:443
+# Para desarrollo local con docker compose sin certificados SSL:
+# CAERUS_ENDPOINT=localhost:9090
+# CAERUS_TLS=false
+
+# API Key generada en el paso 4
+CAERUS_API_KEY=caer_dev_tu_api_key_copiada_aqui
+
+# Plantillas SRE
+CAERUS_TEMPLATE_BUTACA=butaca
+CAERUS_TEMPLATE_CAPACIDAD=funcion_capacidad
+# Opcionales (cartelera completa):
+# CAERUS_TEMPLATE_BUTACA_FILA=butaca_fila
+# CAERUS_TEMPLATE_PRODUCTO=producto
+
+# Habilitar persistencia de metadatos (fila, columna, precio)
+CAERUS_METADATA=on
+
+# Secreto de firma HMAC del Webhook (obtenido al crear el webhook en Caerus)
+CAERUS_WEBHOOK_SECRET=whsec_tu_signing_secret_aqui
+
+# TTL en segundos para reservas (por defecto 30 para demos ágiles)
+CAERUS_TTL_SECONDS=30
+```
+
+---
+
 ## Configuración
 
 Todo vive en `.env.local`, que no se versiona.

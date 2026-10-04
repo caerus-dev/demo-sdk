@@ -46,8 +46,13 @@ function crearCliente(): SharedResourceApi {
     return new MotorEnMemoria()
   }
   const endpoint = process.env.CAERUS_ENDPOINT?.trim()
-  console.log(`[caerus] Conectado al motor desplegado${endpoint ? ` (${endpoint})` : ''}.`)
-  return new CaerusClient({ apiKey, ...(endpoint ? { endpoint } : {}) })
+  const tls = process.env.CAERUS_TLS === 'false' || process.env.CAERUS_TLS === '0' ? false : undefined
+  console.log(`[caerus] Conectado al motor desplegado${endpoint ? ` (${endpoint})` : ''}${tls === false ? ' (sin TLS)' : ''}.`)
+  return new CaerusClient({
+    apiKey,
+    ...(endpoint ? { endpoint } : {}),
+    ...(tls !== undefined ? { tls } : {}),
+  })
 }
 
 export const caerus: SharedResourceApi = globalForCaerus.__caerusCliente ?? observar(crearCliente())

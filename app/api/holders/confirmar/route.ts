@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   const llamadas: LlamadaSDK[] = []
   try {
     await ensureSeed()
-    const { holderIds, comprador, precioTotal } = (await req.json()) as {
+    const { holderIds, comprador, precioTotal } = (await req.json().catch(() => ({}))) as {
       holderIds?: string[]
       comprador?: string
       precioTotal?: number
