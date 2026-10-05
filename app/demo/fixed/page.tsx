@@ -99,6 +99,27 @@ export default function FixedDemoPage() {
   // Mapeo en vivo de butacas desde Caerus
   const seats = useMemo(() => {
     const map: Record<string, DemoSeatInfo> = {}
+    
+    // 1. Inicializar siempre las 30 butacas para que sean clickeables
+    // aunque la sincronización con el backend tenga latencia o estén temporalmente omitidas
+    const COLS = ['A', 'B', 'C', 'D', 'E', 'F']
+    const ROWS = [1, 2, 3, 4, 5]
+    for (const c of COLS) {
+      for (const r of ROWS) {
+        const key = `funcionhorizonte_${c}${r}`
+        map[key] = {
+          key,
+          col: c,
+          row: r,
+          precio: 4500,
+          status: 'available',
+          isDoubleBooked: false,
+          buyers: [],
+        }
+      }
+    }
+
+    // 2. Actualizar con los datos reales del backend
     if (data?.butacas) {
       data.butacas.forEach((b) => {
         const isMine = activeHolder?.seatKey === b.key

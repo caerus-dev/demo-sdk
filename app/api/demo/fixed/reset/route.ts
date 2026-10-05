@@ -41,25 +41,24 @@ export async function POST(req: Request) {
 
       // 3. Recrear las 30 butacas de la sala limpias (A1 a F5) con precio base 4500
       const butacasNuevas = COLUMNAS.flatMap((columna) => FILAS.map((fila) => ({ columna, fila })))
-      for (let i = 0; i < butacasNuevas.length; i += 10) {
-        const tanda = butacasNuevas.slice(i, i + 10)
-        await Promise.allSettled(
-          tanda.map(async ({ columna, fila }) => {
-            const key = butacaKey(funcionId, columna, fila)
-            try {
-              await caerus.createUnitary(PLANTILLAS.butaca, key, {
-                groupKey: grupoButacas(funcionId),
-                ...meta({ fila, columna, precio: 4500 }),
-              })
-            } catch {
-              await caerus.deleteResource(key).catch(() => {})
-              await caerus.createUnitary(PLANTILLAS.butaca, key, {
-                groupKey: grupoButacas(funcionId),
-                ...meta({ fila, columna, precio: 4500 }),
-              }).catch(() => {})
-            }
-          }),
-        )
+      for (const { columna, fila } of butacasNuevas) {
+        const key = butacaKey(funcionId, columna, fila)
+        try {
+          await caerus.createUnitary(PLANTILLAS.butaca, key, {
+            groupKey: grupoButacas(funcionId),
+            ...meta({ fila, columna, precio: 4500 }),
+          })
+        } catch (err: any) {
+          // Si falló (ej: ALREADY_EXISTS o rate limit transitorio)
+          // Forzamos un delete adicional y un último intento de crear
+          await caerus.deleteResource(key).catch(() => {})
+          await caerus.createUnitary(PLANTILLAS.butaca, key, {
+            groupKey: grupoButacas(funcionId),
+            ...meta({ fila, columna, precio: 4500 }),
+          }).catch((createErr: any) => {
+            console.error(`[reset] Falló la creación de ${key}:`, createErr.message || createErr)
+          })
+        }
       }
     })
 
