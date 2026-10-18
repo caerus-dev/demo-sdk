@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Clapperboard, SlidersHorizontal } from 'lucide-react'
+import { NavbarUser } from '@/components/navbar-user'
 
 export function Navbar() {
   return (
@@ -18,13 +19,16 @@ export function Navbar() {
             </span>
           </span>
         </Link>
-        <Link
-          href="/backoffice"
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/50 hover:text-primary"
-        >
-          <SlidersHorizontal className="size-4" aria-hidden="true" />
-          Backoffice
-        </Link>
+        <div className="flex items-center gap-2.5">
+          <NavbarUser />
+          <Link
+            href="/backoffice"
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/50 hover:text-primary"
+          >
+            <SlidersHorizontal className="size-4" aria-hidden="true" />
+            Backoffice
+          </Link>
+        </div>
       </div>
     </header>
   )

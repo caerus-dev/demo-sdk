@@ -23,10 +23,11 @@ export async function POST(req: Request) {
       )
     }
 
+    const ttlSeconds = Number(process.env.CAERUS_TTL_SECONDS) || 30
     const holder = await conRegistro(llamadas, () =>
       caerus.pooled(productoKey).takeMany(cantidad, {
         idempotencyKey: `${sessionId}:${productoKey}:${cantidad}:${intento ?? sessionId}`,
-        ttlSeconds: 120,
+        ttlSeconds,
         ...meta({ productoKey, cantidad }),
       }),
     )

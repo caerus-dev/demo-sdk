@@ -7,25 +7,29 @@ import { AlertTriangle, CheckCircle2, Loader2, Minus, Plus, Popcorn, TimerReset,
 import { Countdown } from '@/components/countdown'
 import {
   cerrarIntento,
+  conectarEventosWebhook,
   fetcher,
   formatPrecio,
   getSessionId,
+  getUsuarioActual,
   guardarReserva,
   intentoDe,
   leerReserva,
   limpiarReserva,
+  registrarCompraUsuario,
   type ProductoReservado,
   type ReservaSesion,
 } from '@/lib/client'
 import { publicar } from '@/lib/registro-cliente'
 import type { ProductoDTO } from '@/lib/cine'
+import { cn } from '@/lib/utils'
 
 export function Checkout({ funcionId }: { funcionId: string }) {
   const router = useRouter()
-  const { data: productosData } = useSWR<{ productos: ProductoDTO[] }>(
+  const { data: productosData, mutate: mutateProductos } = useSWR<{ productos: ProductoDTO[] }>(
     '/api/productos',
     fetcher,
-    { refreshInterval: 5000 },
+    { revalidateOnFocus: false },
   )
 
   const [reserva, setReserva] = useState<ReservaSesion>({
@@ -39,9 +43,21 @@ export function Checkout({ funcionId }: { funcionId: string }) {
   const [pagando, setPagando] = useState(false)
   const [ok, setOk] = useState(false)
   const [trabajando, setTrabajando] = useState<string | null>(null)
+
   useEffect(() => {
     setReserva(leerReserva(funcionId))
+    const usuario = getUsuarioActual()
+    setComprador(usuario.nombre)
   }, [funcionId])
+
+  // Escuchar eventos de webhook para refrescar stock en vivo (SSE + compatibilidad con túneles)
+  useEffect(() => {
+    return conectarEventosWebhook({
+      onWebhook: () => {
+        void mutateProductos()
+      },
+    })
+  }, [mutateProductos])
 
   const reservaRef = useRef(reserva)
   useEffect(() => {
@@ -76,7 +92,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
 
   const holderIds = useMemo(
     () => [
-      ...reserva.butacas.flatMap((b) => [b.butacaHolderId, b.capacidadHolderId]),
+      ...reserva.butacas.map((b) => b.butacaHolderId),
       ...reserva.productos.map((p) => p.holderId),
     ],
     [reserva],
@@ -92,7 +108,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
     const vivos = [
       ...reserva.butacas
         .filter((b) => new Date(b.expiresAt).getTime() > ahora)
-        .flatMap((b) => [b.butacaHolderId, b.capacidadHolderId]),
+        .map((b) => b.butacaHolderId),
       ...reserva.productos
         .filter((p) => new Date(p.expiresAt).getTime() > ahora)
         .map((p) => p.holderId),
@@ -138,7 +154,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         | null
       publicar('candy bar', json)
       if (res.status === 409) {
-        setAviso(`No hay stock suficiente de ${producto.nombre} para esa cantidad.`)
+        setAviso(`❌ Error de contención (ConflictError): Pediste ${cantidad} unidades, pero solo hay ${producto.disponibles} disponibles. El motor Caerus opera de forma atómica (todo o nada).`)
         return
       }
       if (!res.ok || !json) {
@@ -192,7 +208,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
       publicar('cancelar', await res.json().catch(() => null))
     } finally {
       limpiarReserva(funcionId)
-      router.push('/')
+      router.push(`/funcion/${funcionId}`)
     }
   }
 
@@ -238,12 +254,18 @@ export function Checkout({ funcionId }: { funcionId: string }) {
     }
     setAviso(null)
     setPagando(true)
+    const usuario = getUsuarioActual()
     await new Promise((r) => setTimeout(r, 2200))
     try {
       const res = await fetch('/api/holders/confirmar', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ holderIds, comprador: comprador.trim(), precioTotal: total }),
+        body: JSON.stringify({
+          holderIds,
+          comprador: comprador.trim(),
+          usuarioId: usuario.id,
+          precioTotal: total,
+        }),
       })
       const cuerpo = (await res.json().catch(() => null)) as { confirmados?: number } | null
       publicar('pagar', cuerpo)
@@ -251,7 +273,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         const detalle = cuerpo ?? {}
         setAviso(
           detalle.confirmados
-            ? `Una de tus reservas venció justo al confirmar. Las otras ${detalle.confirmados} quedaron a tu nombre; podés verlas en el Backoffice.`
+            ? `Una de tus reservas venció justo al confirmar. Las otras ${detalle.confirmados} quedaron a tu nombre.`
             : 'Alguna de tus reservas venció mientras pagabas. Volvé a elegir tus butacas.',
         )
         limpiarReserva(funcionId)
@@ -262,6 +284,14 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         setAviso('No pudimos confirmar el pago. Reintentá.')
         return
       }
+
+      // Registrar las butacas compradas para este usuario específico
+      registrarCompraUsuario(
+        usuario.id,
+        funcionId,
+        reserva.butacas.map((b) => b.butacaKey),
+      )
+
       setOk(true)
       limpiarReserva(funcionId)
     } catch {
@@ -272,23 +302,31 @@ export function Checkout({ funcionId }: { funcionId: string }) {
   }
   if (ok) {
     return (
-      <div className="mx-auto max-w-md rounded-2xl border border-status-confirmed/40 bg-card p-8 text-center">
+      <div className="mx-auto max-w-md rounded-2xl border border-status-confirmed/40 bg-card p-8 text-center shadow-lg">
         <span className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-status-confirmed/15 text-status-confirmed">
-          <CheckCircle2 className="size-8" aria-hidden="true" />
+          <CheckCircle2 className="size-8 text-emerald-500" aria-hidden="true" />
         </span>
         <h2 className="font-display text-2xl font-bold text-foreground">¡Compra confirmada!</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Gracias, {comprador}. Confirmamos {reserva.butacas.length || 'tus'} butacas
-          {reserva.productos.length ? ' y tu pedido del candy bar' : ''}. Podés ver el registro
-          en el Backoffice.
+          Gracias, {comprador}. Confirmamos tus {reserva.butacas.length || ''} butacas
+          {reserva.productos.length ? ' y tu pedido del candy bar' : ''}. El motor Caerus registró la venta en estado terminal (CONFIRMED).
         </p>
-        <button
-          type="button"
-          onClick={() => router.push('/')}
-          className="mt-6 w-full rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          Volver a la cartelera
-        </button>
+        <div className="mt-6 flex flex-col gap-2.5">
+          <button
+            type="button"
+            onClick={() => router.push(`/funcion/${funcionId}`)}
+            className="w-full rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90 cursor-pointer"
+          >
+            Ver sala de butacas
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="w-full rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground cursor-pointer"
+          >
+            Volver a la cartelera
+          </button>
+        </div>
       </div>
     )
   }
@@ -363,9 +401,19 @@ export function Checkout({ funcionId }: { funcionId: string }) {
                 >
                   <div>
                     <p className="font-medium text-foreground">{p.nombre}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {p.tamanio} · {formatPrecio(p.precio)} · {p.disponibles} en stock
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {p.tamanio} · {formatPrecio(p.precio)}
                     </p>
+                    <div className="flex items-center gap-2 mt-1 text-xs">
+                      <span className={cn('font-medium', p.disponibles === 0 ? 'text-destructive' : 'text-emerald-400')}>
+                        {p.disponibles} disponibles
+                      </span>
+                      {p.pendientes > 0 ? (
+                        <span className="text-amber-400 text-[11px]">
+                          ({p.pendientes} en {p.pendientes === 1 ? 'carrito' : 'carritos'})
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   {enCarro ? (
                     <span className="inline-flex items-center gap-1.5 rounded-lg bg-status-confirmed/15 px-3 py-2 text-xs font-medium text-status-confirmed">
@@ -449,17 +497,37 @@ export function Checkout({ funcionId }: { funcionId: string }) {
             </span>
           </div>
           <div className="mt-5">
-            <label htmlFor="comprador" className="mb-1.5 block text-sm font-medium text-foreground">
-              Nombre del comprador
-            </label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label htmlFor="comprador" className="block text-sm font-medium text-foreground">
+                Nombre del comprador
+              </label>
+              <span className="text-[11px] text-muted-foreground">Elegí o escribí</span>
+            </div>
             <input
               id="comprador"
               type="text"
               value={comprador}
               onChange={(e) => setComprador(e.target.value)}
-              placeholder="Ej. Ana Pérez"
+              placeholder="Ej. Ana García"
               className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
             />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {['Ana García', 'Beto Pérez', 'Carlos Gómez', 'Diana Prince'].map((nom) => (
+                <button
+                  key={nom}
+                  type="button"
+                  onClick={() => setComprador(nom)}
+                  className={cn(
+                    "rounded-md border px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer",
+                    comprador === nom
+                      ? "border-primary bg-primary/10 text-primary font-semibold"
+                      : "border-border/70 bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  {nom}
+                </button>
+              ))}
+            </div>
           </div>
           <button
             type="button"

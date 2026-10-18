@@ -10,9 +10,10 @@ export async function POST(req: Request) {
   const llamadas: LlamadaSDK[] = []
   try {
     await ensureSeed()
-    const { holderIds, comprador, precioTotal } = (await req.json()) as {
+    const { holderIds, comprador, usuarioId, precioTotal } = (await req.json()) as {
       holderIds?: string[]
       comprador?: string
+      usuarioId?: string
       precioTotal?: number
     }
     if (!holderIds?.length || !comprador?.trim()) {
@@ -26,9 +27,10 @@ export async function POST(req: Request) {
       Promise.all(
         holderIds.map(async (id) => {
           try {
-            return { id, status: (await caerus.getResourceHolder(id)).status }
+            const h = await caerus.getResourceHolder(id)
+            return { id, status: h.status, metadata: h.metadata ?? {} }
           } catch {
-            return { id, status: 'DESCONOCIDO' as const }
+            return { id, status: 'DESCONOCIDO' as const, metadata: {} }
           }
         }),
       ),
@@ -55,8 +57,16 @@ export async function POST(req: Request) {
 
     const resultados = await conRegistro(llamadas, () =>
       Promise.allSettled(
-        holderIds.map((id) =>
-          caerus.confirm(id, meta({ comprador: comprador.trim(), precioTotal })),
+        estados.map((e) =>
+          caerus.confirm(
+            e.id,
+            meta({
+              ...e.metadata,
+              comprador: comprador.trim(),
+              usuarioId,
+              precioTotal,
+            }),
+          ),
         ),
       ),
     )

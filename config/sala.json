@@ -1,0 +1,56 @@
+{
+  "ttlSecondsDefault": 30,
+  "usuariosDemo": [
+    "Ana García",
+    "Beto Pérez",
+    "Carlos Gómez",
+    "Diana Prince"
+  ],
+  "funciones": [
+    {
+      "id": "horizonte",
+      "titulo": "El Último Horizonte",
+      "horario": "Hoy 20:30",
+      "posterUrl": "/posters/nebula.png",
+      "precioBase": 4500,
+      "politica": "FAIL",
+      "plantilla": "butaca",
+      "filas": 5,
+      "columnas": ["A", "B", "C", "D", "E", "F"]
+    },
+    {
+      "id": "neon",
+      "titulo": "Lluvia de Neón",
+      "horario": "Hoy 22:45",
+      "posterUrl": "/posters/neon-city.png",
+      "precioBase": 5200,
+      "politica": "QUEUE",
+      "plantilla": "butaca_fila",
+      "filas": 5,
+      "columnas": ["A", "B", "C", "D", "E", "F"]
+    }
+  ],
+  "productos": [
+    {
+      "key": "producto_combo-pareja",
+      "nombre": "Combo Pareja (2 Gaseosas + Balde)",
+      "tamanio": "Para 2",
+      "precio": 8900,
+      "stock": 10
+    },
+    {
+      "key": "producto_pochoclos-grandes",
+      "nombre": "Pochoclos Grandes",
+      "tamanio": "Grande",
+      "precio": 3800,
+      "stock": 15
+    },
+    {
+      "key": "producto_nachos-con-queso",
+      "nombre": "Nachos con Queso",
+      "tamanio": "Único",
+      "precio": 4200,
+      "stock": 12
+    }
+  ]
+}

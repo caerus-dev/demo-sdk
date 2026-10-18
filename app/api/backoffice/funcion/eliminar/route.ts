@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { caerus, conRegistro, type LlamadaSDK } from '@/lib/caerus'
-import { COLUMNAS, FILAS, butacaKey, ensureSeed, infoKey } from '@/lib/cine'
+import { COLUMNAS, FILAS, butacaKey, ensureSeed } from '@/lib/cine'
 import { errorResponse } from '@/lib/api'
 import { rechazoSiNoAutorizado } from '@/lib/backoffice-auth'
 
@@ -21,7 +21,6 @@ export async function POST(req: Request) {
     }
 
     const resultado = await conRegistro(llamadas, async () => {
-      await caerus.deleteResource(infoKey(funcionId))
 
       const claves = COLUMNAS.flatMap((columna) =>
         FILAS.map((fila) => butacaKey(funcionId, columna, fila)),

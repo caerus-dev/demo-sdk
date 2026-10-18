@@ -1,11 +1,8 @@
 import { NextResponse } from 'next/server'
-import { caerus } from '@/lib/caerus'
 import {
-  butacaFromResource,
+  catalogoFuncion,
   ensureSeed,
-  funcionFromResource,
-  grupoButacas,
-  infoKey,
+  obtenerButacasFuncion,
 } from '@/lib/cine'
 import { errorResponse } from '@/lib/api'
 
@@ -16,16 +13,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   try {
     await ensureSeed()
     const { id } = await params
+    const f = catalogoFuncion(id)
 
-    const info = await caerus.getResource(infoKey(id))
-    const { resources } = await caerus.getResourcesByGroup(grupoButacas(id), { pageSize: 200 })
+    const butacas = await obtenerButacasFuncion(id)
+    const disponibles = butacas.filter((b) => b.disponible).length
 
-    const butacas = resources.map(butacaFromResource).sort((a, b) => {
-      if (a.columna !== b.columna) return a.columna.localeCompare(b.columna)
-      return a.fila - b.fila
-    })
     return NextResponse.json({
-      funcion: funcionFromResource(info),
+      funcion: {
+        id,
+        titulo: f?.titulo ?? 'Función',
+        horario: f?.horario ?? '',
+        posterUrl: f?.posterUrl ?? '',
+        precioBase: f?.precioBase ?? 0,
+        politica: f?.politica ?? 'FAIL',
+        butacasDisponibles: disponibles,
+        capacidadTotal: butacas.length,
+      },
       butacas,
     })
   } catch (error) {

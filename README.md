@@ -1,250 +1,161 @@
-# Caerus Cine — demo de concurrencia
+# Caerus Cine — Demo de Concurrencia (Edición Jury / Presentación Final)
 
-Demo de un cine que usa **Caerus** para reservar butacas: se toman por unos minutos, se
-liberan solas si nadie paga, y dos personas que quieren la misma butaca chocan de verdad.
+Demo interactiva de una cadena de cine que utiliza **Caerus** para orquestar la concurrencia, reservas temporales y resolución de conflictos en tiempo real mediante el SDK oficial (`@caerus-dev/sdk`).
 
-Corre contra el motor Caerus desplegado a través del SDK publicado, `@caerus-dev/sdk`, y
-ejercita **los trece verbos** de su API pública.
+La sala y el catálogo son completamente configurables mediante `config/sala.json`, y la sincronización entre múltiples clientes se realiza en tiempo real a través de **Webhooks** de Caerus y **Server-Sent Events (SSE)** hacia el frontend, sin necesidad de polling continuo.
 
-Las dos funciones de la cartelera tienen **políticas distintas de conflicto**, y esa es la
-idea central de la demo:
+---
+
+## 🎯 Políticas de Conflicto en Cartelera
+
+La cartelera presenta dos películas que demuestran las dos estrategias de resolución de conflictos provistas por el motor Caerus para recursos de tipo **Unitario**:
 
 | | *El Último Horizonte* | *Lluvia de Neón* |
 |---|---|---|
-| Plantilla de butaca | `butaca` (`FAIL`) | `butaca_fila` (`QUEUE`) |
-| El segundo que pide la misma butaca | recibe un conflicto y la pierde | **queda en la fila** |
-| Cuando el primero libera | nada | el motor **se la asigna solo**, en segundos |
+| **Plantilla SRE** | `butaca` (`FAIL`) | `butaca_fila` (`QUEUE`) |
+| **Comportamiento ante colisión** | El segundo usuario recibe `409 Conflict` inmediato. | El segundo usuario entra en **cola de espera** (`QUEUED`). |
+| **Al liberarse la butaca** | Queda libre para quien la tome primero. | El motor **promueve automáticamente** al usuario en cola (`resource.taken`). |
+| **Notificación en vivo** | Webhook → SSE a todos los navegadores. | Webhook → SSE asigna la butaca en la pantalla del usuario en cola. |
 
-Mismo código, dos comportamientos. La diferencia es un campo en una plantilla del
-dashboard, no una línea de esta app.
+> **Nota de Arquitectura:** Ambos flujos ejecutan exactamente el mismo código fuente (`caerus.unitary(key).take(...)`). La diferencia de comportamiento reside 100% en la configuración declarativa de la plantilla en el motor Caerus.
 
-## Publicada
+---
 
-**https://caerus-demo.vercel.app** — repo `caerus-dev/demo-sdk`, cada push a `main` redeploya solo.
+## 📋 Recursos y Plantillas Necesarias en Caerus
 
-Las variables de entorno viven en Vercel, no en el repo. El Backoffice queda en **solo
-lectura** salvo que cargues el token de `BACKOFFICE_TOKEN`: reservar y comprar están
-abiertos para cualquiera, modificar el inventario no.
+Para replicar el entorno de la demo desde cero en el **Dashboard de Caerus**, es necesario tener creada una **Aplicación** y las siguientes **3 Plantillas de Recursos Compartidos**:
 
-## Levantarla
+### 1. Plantillas de Recursos (Shared Resource Templates)
 
-```bash
-npm install
-npm run dev
-```
-
-Abrila en **dos ventanas distintas** y pelea con vos mismo por la misma butaca. Cada
-pestaña es un usuario distinto: la identidad vive en `sessionStorage`, que es por pestaña.
-
-## El panel de llamadas
-
-Debajo del mapa de butacas y del checkout hay un panel que muestra **cada llamada real al
-SDK a medida que ocurre**, con sus argumentos y lo que contestó el motor:
-
-```
-22:53:33   reservar   53 ms
-caerus.unitary('funcionneon_D9').take({ idempotencyKey: '…', ttlSeconds: 120 })
-✕ ConflictError: Out of stock for resource: funcionneon_D9
-```
-
-Existe porque lo que la demo defiende es la **biblioteca**, y el SDK corre en el servidor
-donde nadie lo ve. Se implementa con un Proxy sobre el cliente (`lib/caerus/registro.ts`),
-no con `console.log` desperdigados: así el panel no puede desincronizarse de lo que
-realmente se ejecuta, y una llamada nueva aparece sola.
-
-Solo registra **acciones del usuario** —reservar, quitar, candy bar, pagar, cancelar—. Las
-consultas del refresco automático corren cada 3 segundos y ahogarían el panel.
-
-## Configuración
-
-Todo vive en `.env.local`, que no se versiona.
-
-| Variable | Para qué |
-|---|---|
-| `CAERUS_API_KEY` | API Key del ambiente. **Sin ella la demo arranca igual**, contra un motor en memoria. |
-| `CAERUS_ENDPOINT` | Host del motor. El SDK ya trae uno por defecto. |
-| `CAERUS_TEMPLATE_BUTACA` / `_BUTACA_FILA` / `_CAPACIDAD` / `_PRODUCTO` | Nombres de las plantillas del dashboard. |
-| `CAERUS_METADATA` | `on` sólo si la plantilla acepta guardar metadata (ver abajo). |
-
-### Correr contra un Caerus local
-
-Útil cuando el ambiente desplegado se rompe o lo pisa un deploy: el data plane arranca con
-`ddl-auto: create`, así que **cada reinicio del deploy borra las plantillas y el inventario**.
-Un Caerus local no te lo pisa nadie.
-
-Con el repo `caerus-back` al lado:
-
-```bash
-docker compose up -d postgres-dev-common redis rabbitmq zookeeper
-```
-
-Levantá el `data-plane-service` (expone gRPC en `9090`), y sembrá la API Key y las cuatro
-plantillas por SQL, sin pasar por el dashboard:
-
-```bash
-docker exec -i postgres-dev-common psql -U admin -d caerus_data_plane < scripts/caerus-local.sql
-```
-
-Después apuntá la demo, en `.env.local`:
-
-```bash
-CAERUS_ENDPOINT=localhost:9090
-CAERUS_TLS=false
-CAERUS_API_KEY=caer_dev_T3STK3Y00000000000001
-CAERUS_METADATA=on
-```
-
-`CAERUS_TLS=false` es imprescindible: el SDK cifra por defecto y solo desactiva el cifrado
-con un `false` o un `0` explícitos. Un valor mal escrito **no** apaga la encriptación,
-a propósito.
-
-La ventaja concreta: el seed crea `butaca_fila` con resolución `QUEUE`, así que podés
-probar la cola de espera sin depender de que exista la plantilla en el dashboard.
-
-Ojo: `ddl-auto: create` también aplica local, así que hay que re-sembrar cada vez que
-reinicies el data plane.
-
-### Dos motores, un mismo contrato
-
-`lib/caerus/index.ts` elige la implementación según haya `CAERUS_API_KEY`:
-
-- **con key** → `new CaerusClient(...)`, el SDK real contra el motor desplegado;
-- **sin key** → `MotorEnMemoria` (`lib/caerus/memory.ts`), que respeta las mismas reglas
-  (conflictos, idempotencia, vencimiento) sin necesitar infraestructura.
-
-Los dos implementan `SharedResourceApi`, el tipo del SDK. La app no sabe cuál tiene
-enchufado, y por eso se puede mostrar la demo sin conexión sin cambiar una línea.
-
-### Qué pone Caerus y qué pone la app
-
-El **catálogo** —qué películas hay, horarios, pósters, precios, productos del candy bar—
-es configuración de esta app, en `lib/cine.ts`. Caerus se ocupa de lo suyo: cuántas
-unidades quedan, quién las tiene tomadas y hasta cuándo. Un motor de concurrencia no es
-una base de datos de productos.
-
-Como efecto secundario, la demo no depende de que la plantilla guarde metadata. Si la
-plantilla la acepta, se pone `CAERUS_METADATA=on` y además se guarda en el motor el
-nombre del comprador y el detalle de cada reserva, que el Backoffice muestra.
-
-## Plantillas que espera
-
-Se crean **en el dashboard**, no desde acá.
-
-| Plantilla | Tipo | TTL | Resolución | Metadata | Idempotencia |
+| Nombre de Plantilla | Tipo de Recurso | TTL por Defecto | Resolución de Conflicto | Guardar Metadata | Exigir Idempotencia |
 |---|---|---|---|---|---|
-| `butaca` | Unitaria | 2 min | `FAIL` | Sí | No |
-| `butaca_fila` | Unitaria | 2 min | **`QUEUE`** | Sí | No |
-| `funcion_capacidad` | Múltiple | 2 min | `FAIL` | Sí | No |
-| `producto` | Múltiple | 2 min | `FAIL` | Sí | No |
+| **`butaca`** | `UNITARY` | `30s` (o `120s`) | **`FAIL`** | Sí (`true`) | No (`false`) |
+| **`butaca_fila`** | `UNITARY` | `30s` (o `120s`) | **`QUEUE`** | Sí (`true`) | No (`false`) |
+| **`producto`** | `POOLED` | `30s` (o `120s`) | **`FAIL`** | Sí (`true`) | No (`false`) |
 
-Por qué así:
+#### Justificación técnica de la configuración:
+- **`UNITARY` para butacas:** El motor garantiza matemáticamente que existe una sola instancia disponible por butaca. Impide asignaciones dobles sin necesidad de bloqueos pesados en bases de datos relacionales.
+- **`POOLED` para Candy Bar:** Permite gestionar inventarios compartidos de unidades intercambiables (ej. 15 combos de pochoclos). Soporta `takeMany(n)` atómico (todo-o-nada).
+- **TTL Dinámico:** La aplicación puede solicitar un TTL explícito en el `take` (por defecto `CAERUS_TTL_SECONDS=30` para agilizar la demo). Si no se especifica, toma el de la plantilla.
+- **Idempotencia:** La demo genera `idempotencyKey` únicos por intento (`UUID`), protegiendo al usuario contra reintentos por fallas de red sin bloquear operaciones subsiguientes.
 
-- **`butaca` Unitaria**: el motor *garantiza* que hay una sola. Rechaza crearla con
-  cantidad ≠ 1, rechaza tomarla de a 2, y prohíbe modificarle el stock.
-- **`butaca` y `butaca_fila` son idénticas salvo la resolución.** Esa única diferencia
-  es todo lo que separa "el segundo pierde" de "el segundo espera su turno".
-- **Si `butaca_fila` no existe, la demo no se rompe**: siembra con `butaca` y muestra
-  honestamente "sin cola" en vez de prometer una fila que no va a funcionar. La política
-  real de cada función queda guardada en su metadata, así que el cartel nunca miente.
-- **Idempotencia en No**: la app manda `idempotencyKey` en los tres caminos igual, así
-  que se puede prender sin tocar código. En `Sí` el motor la exige siempre, y es una
-  piedra para el que agregue una llamada nueva.
-- **Metadata en Sí**: sin eso hay que poner `CAERUS_METADATA=off`, o toda reserva falla.
+---
 
-El TTL de la plantilla lo pisa la app: pide `ttlSeconds: 120` en cada reserva.
+### 2. Configuración de Webhook en Caerus
 
-### Si cambiás una plantilla
+La demo incluye un endpoint receptor de webhooks que emite eventos en tiempo real a las pantallas conectadas:
 
-Los recursos ya creados quedan atados a la plantilla vieja. Para rehacerlos:
+- **URL del Webhook:** `https://<tu-dominio-o-ngrok>/api/webhooks/caerus`
+- **Eventos a suscribir:**
+  - `resource.taken` (butaca o producto reservado / promovido de cola)
+  - `resource.queued` (usuario entra a cola de espera)
+  - `resource.released` (butaca liberada voluntariamente)
+  - `resource.expired` (butaca expirada por TTL del motor)
+  - `resource.confirmed` (compra finalizada con éxito)
+- **Secret:** Copiar el secreto generado por el dashboard (ej. `whsec_...`) y colocarlo en `CAERUS_WEBHOOK_SECRET`.
+
+---
+
+## ⚙️ Variables de Entorno (`.env.local`)
+
+Crear un archivo `.env.local` en la raíz del proyecto:
 
 ```bash
-node scripts/resembrar.mjs           # ensayo: lista qué borraría
-node scripts/resembrar.mjs --borrar  # borra de verdad
-npm run dev                          # al abrir la cartelera, siembra sola
+# Credenciales del Data Plane de Caerus
+CAERUS_API_KEY=caer_app_tu_api_key_aqui
+CAERUS_ENDPOINT=api.caerus.dev:443
+CAERUS_TLS=true
+
+# Secreto para verificar la firma HMAC de los Webhooks
+CAERUS_WEBHOOK_SECRET=whsec_tu_webhook_secret_aqui
+
+# TTL de las reservas en segundos (30s recomendado para la demo de 20 min)
+CAERUS_TTL_SECONDS=30
+
+# Nombres de las plantillas en Caerus
+CAERUS_TEMPLATE_BUTACA=butaca
+CAERUS_TEMPLATE_BUTACA_FILA=butaca_fila
+CAERUS_TEMPLATE_PRODUCTO=producto
+
+# Habilitar persistencia de metadata en holders
+CAERUS_METADATA=on
+
+# Puerto local (opcional)
+PORT=3000
 ```
 
-## Si la conexión falla con "unable to verify the first certificate"
+> **Modo Fallback Offline:** Si `CAERUS_API_KEY` se omite, la app arranca automáticamente con un **Motor en Memoria** que simula localmente las mismas garantías de Caerus (conflictos, colas y TTL).
 
-No es Caerus. Es un antivirus o un proxy corporativo que **inspecciona HTTPS** (Avast,
-Kaspersky, ESET, Zscaler). Ese software intercepta la conexión y la re-firma con una raíz
-propia: Windows confía en ella, así que el navegador anda, pero Node trae su propio
-almacén de raíces y no la tiene.
+---
 
-La solución es que Node también confíe en esa raíz:
+## 🚀 Ejecución
 
-1. Exportá el certificado raíz del antivirus a `certs/` en formato PEM.
-2. `npm run dev` lo levanta solo (`scripts/dev.mjs` arma el bundle y setea
-   `NODE_EXTRA_CA_CERTS` antes de arrancar Next).
+### 1. Instalación y arranque
 
-**No** uses `NODE_TLS_REJECT_UNAUTHORIZED=0`: apaga la verificación de toda la app y deja
-pasar cualquier certificado, incluido el de un atacante real.
+```bash
+# Instalar dependencias
+npm install
+# o con pnpm
+pnpm install
 
-## El Backoffice
+# Iniciar servidor de desarrollo
+npm run dev
+# o en un puerto específico
+PORT=3000 npm run dev
+```
 
-Tres cosas además del alta de funciones y productos:
+### 2. Simulación de Concurrencia (Dos ventanas lado a lado)
 
-| Panel | Qué hace | Verbo del SDK |
-|---|---|---|
-| **Funciones en cartelera** | Eliminar borra la capacidad y las 54 butacas | `deleteResource` |
-| **Stock del candy bar** | Reponer devuelve el stock al valor del catálogo | `updateResource` |
-| **Soltar reservas en curso** | Libera de un saque los holders `PENDING` y los `QUEUED` | `release` |
+Para la presentación o pruebas de colisión:
+1. Abrir **dos navegadores diferentes** (ej. Chrome normal e Incógnito, o Chrome y Firefox) apuntando a `http://localhost:3000`.
+2. Cada ventana mantendrá una sesión y usuario independiente (`sessionStorage`).
+3. En la ventana izquierda ("Usuario 1") y la derecha ("Usuario 2"), ingresar a la misma función.
+4. Al hacer clic simultáneo o secuencial sobre la misma butaca:
+   - En *El Último Horizonte*: Uno obtiene la reserva y el otro recibe el aviso de colisión `409 Out of stock`.
+   - En *Lluvia de Neón*: Uno obtiene la reserva y el otro queda en `En cola de espera`. Al soltar el primero, el segundo pasa a tener la butaca inmediatamente vía Webhook/SSE.
 
-"Soltar reservas en curso" es el botón que vas a querer entre una demo y la siguiente. No
-toca las compras confirmadas: esas son terminales y el motor no tiene "descomprar".
+---
 
-Reponer calcula el faltante contra la capacidad **total** —disponible más reservado—, no
-contra lo disponible. Si no, repone de más mientras alguien tiene unidades en la mano.
+## 🍿 Candy Bar (Stock Atómico `POOLED`)
 
-## Mantenimiento
+En la pantalla de Checkout (`/funcion/[id]/checkout`), el Candy Bar permite adquirir combos y bebidas:
+- El stock inicial se define en `config/sala.json`.
+- Cada reserva ejecuta `caerus.pooled(productoKey).takeMany(cantidad, { idempotencyKey })`.
+- **Garantía todo-o-nada:** Si se solicitan 10 unidades y solo quedan 8, Caerus rechaza la reserva completa sin consumir parcialmente el inventario.
+- Los productos reservados muestran una insignia **`POOLED`** y el badge con las unidades actualmente comprometidas por otros usuarios en tiempo real.
 
-Los tres tienen ensayo antes de tocar nada:
+---
 
-| Script | Para qué |
-|---|---|
-| `scripts/resembrar.mjs` | Rehace el inventario entero. Necesario si cambiás una plantilla |
-| `scripts/liberar-vendida.mjs <funcion> <butaca>` | Devuelve al ruedo una butaca ya vendida |
-| `scripts/reponer-producto.mjs [slug]` | Repone el stock de un producto |
+## 📡 Monitor de Webhooks en Vivo (`WebhookFeed`)
 
-Devolver una butaca vendida es borrar y recrear el recurso, porque confirmar es terminal.
-Es mantenimiento, no una operación que una app de verdad deba poder hacer con una venta.
+Tanto en la grilla de la sala como en el checkout, se encuentra disponible un panel flotante colapsable (**"Caerus Live Webhooks"**):
+- Muestra el flujo en tiempo real de notificaciones `POST /api/webhooks/caerus`.
+- Permite desplegar el payload JSON firmado que Caerus envía ante cada evento (`resource.taken`, `resource.expired`, etc.).
+- Facilita a los evaluadores verificar que la expiración y reasignación son eventos asíncronos genuinos disparados por el cluster de Caerus.
 
-Después de un `resembrar.mjs --borrar` **no hace falta reiniciar**: la app revalida el
-sembrado cada 30 segundos y vuelve a crear todo sola.
+---
 
-## Lo que sabemos que falla
+## 🛠️ Estructura del Proyecto
 
-**Si el dueño de una butaca la compra, el que estaba en la fila queda esperando para
-siempre.** Es correcto —la butaca se vendió, no hay nada que darle— pero si alguien se
-queda colgado en la demo, esa es la razón.
-
-Bajo ráfagas de muchos pedidos a la vez, los números de la cartelera pueden ir unos
-segundos atrasados respecto del motor. Se asientan solos.
-
-## Detalles que importan
-
-- **La clave de idempotencia es por intento, no por butaca.** Se arma como
-  `sessionId:butacaKey:intento`, donde `intento` es un UUID que vive en `sessionStorage` y
-  se descarta al soltar la butaca o al vencerse. Así el doble clic sigue devolviendo el
-  mismo holder —que es para lo que existe la idempotencia— pero volver a pedir una butaca
-  que soltaste arranca una operación nueva. Con una clave fija por usuario y butaca, el
-  motor contestaba con el holder viejo ya liberado: correcto de su parte, y un error
-  nuestro por reusar una clave para otra cosa.
-- **Ninguna respuesta del motor se da por buena sin mirar el estado.** `exigirHolderVivo`
-  rechaza cualquier holder que no venga `PENDING` o `QUEUED`, así que un `200` con un
-  holder muerto se convierte en un `409` visible en vez de una reserva fantasma.
-- **El mapa revalida sus propias reservas cada cinco segundos** contra `/api/holders`. Si
-  un holder dejó de estar vigente —lo soltó el Backoffice, se venció, lo liberó otra
-  ventana— la butaca vuelve a estar libre en pantalla sola.
-- **`serverExternalPackages`** en `next.config.mjs`: `@grpc/grpc-js` no se puede
-  empaquetar. Si se saca, todas las llamadas fallan.
-- **`export const runtime = 'nodejs'`** en cada Route Handler: gRPC necesita el runtime de
-  Node, no el Edge.
-- **Confirmar es irreversible.** Por eso `/api/holders/confirmar` revisa que TODAS las
-  reservas del pedido sigan vigentes antes de confirmar una sola.
-- **Cada butaca vence por su cuenta.** El temporizador muestra la más próxima; al llegar a
-  cero se descarta sólo esa, no el pedido entero.
-- **Estar en la fila no reserva capacidad.** Mientras esperás no tenés nada tomado; la
-  unidad de capacidad de la sala se pide recién cuando el motor te promueve a `PENDING`.
-  Si en ese momento no hay capacidad, se libera la butaca: la misma compensación que al
-  reservar normalmente.
-- **El guion de la demo está en `GUION.md`.**
+```
+├── config/
+│   └── sala.json             # Declaración de funciones, salas (5x6 = 30 butacas) y catálogo de candy bar
+├── lib/
+│   ├── caerus/
+│   │   ├── index.ts          # Inicializador singleton del cliente Caerus (@caerus-dev/sdk)
+│   │   ├── memory.ts         # Motor de prueba en memoria (fallback sin API key)
+│   │   └── registro.ts       # Proxy interceptor para telemetría de llamadas del SDK
+│   ├── cine.ts               # Lógica de dominio, inventario y mapeo de salas
+│   ├── event-bus.ts          # EventBus local que puentea Webhooks hacia Server-Sent Events
+│   └── client.ts             # Cliente HTTP frontend con manejo de sesiones
+├── app/
+│   ├── api/
+│   │   ├── webhooks/caerus/  # Endpoint receptor de webhooks de Caerus (valida HMAC)
+│   │   ├── events/stream/    # Endpoint SSE (Server-Sent Events) para el navegador
+│   │   └── funciones/        # Endpoints REST de cartelera, butacas y reservas
+│   ├── funcion/[id]/         # Vista de sala interactiva con mapa de butacas
+│   │   └── checkout/         # Vista de checkout con candy bar (POOLED) y temporizador
+│   └── backoffice/           # Panel de auditoría de holders y reabastecimiento de stock
+└── scripts/
+    └── resembrar.mjs         # Utilidad para limpiar y reconstruir el inventario en Caerus
+```

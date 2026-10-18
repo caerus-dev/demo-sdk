@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react'
 import { SeatMap } from '@/components/seat-map'
 import { FuncionHeader } from '@/components/funcion-header'
 import { RegistroCaerus } from '@/components/registro-caerus'
+import { WebhookFeed } from '@/components/webhook-feed'
 import { IdentidadUsuario } from '@/components/identidad-usuario'
 
 export default async function FuncionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +20,10 @@ export default async function FuncionPage({ params }: { params: Promise<{ id: st
       <FuncionHeader funcionId={id} />
       <IdentidadUsuario className="mb-6" />
       <SeatMap funcionId={id} />
-      <RegistroCaerus className="mt-8" />
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <RegistroCaerus />
+        <WebhookFeed />
+      </div>
     </main>
   )
 }

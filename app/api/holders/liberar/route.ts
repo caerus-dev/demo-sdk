@@ -9,20 +9,21 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: Request) {
   const llamadas: LlamadaSDK[] = []
   try {
-    await ensureSeed()
-    const { holderIds } = (await req.json()) as { holderIds?: string[] }
-    if (!holderIds?.length) {
+    const { holderIds } = (await req.json().catch(() => ({}))) as { holderIds?: string[] }
+    const validos = (holderIds ?? []).filter((id): id is string => Boolean(id && typeof id === 'string'))
+    if (!validos.length) {
       return NextResponse.json({ liberados: 0 })
     }
 
     let liberados = 0
     await conRegistro(llamadas, () =>
       Promise.all(
-        holderIds.map(async (id) => {
+        validos.map(async (id) => {
           try {
             await caerus.release(id)
             liberados += 1
-          } catch {
+          } catch (e) {
+            console.warn(`[liberar] Error liberando holder ${id}:`, e)
           }
         }),
       ),
@@ -32,3 +33,4 @@ export async function POST(req: Request) {
     return errorResponse(error, llamadas)
   }
 }
+

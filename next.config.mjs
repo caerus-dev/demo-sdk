@@ -1,4 +1,10 @@
 const nextConfig = {
+  compress: false,
+  allowedDevOrigins: [
+    '*.trycloudflare.com',
+    '*.ngrok-free.app',
+    '*.ngrok.io',
+  ],
   typescript: {
     ignoreBuildErrors: true,
   },

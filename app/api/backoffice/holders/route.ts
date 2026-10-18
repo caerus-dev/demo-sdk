@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server'
 import { caerus, type ResourceHolderStatus } from '@/lib/caerus'
 import {
   butacaFromResource,
+  CATALOGO_FUNCIONES,
   ensureSeed,
-  funcionFromResource,
-  GRUPO_FUNCIONES,
   GRUPO_PRODUCTOS,
   grupoButacas,
   holderToDTO,
@@ -20,22 +19,20 @@ const ESTADOS: ResourceHolderStatus[] = ['PENDING', 'CONFIRMED', 'RELEASED', 'QU
 async function buildRefIndex(): Promise<Map<string, { resourceKey: string; etiqueta: string }>> {
   const index = new Map<string, { resourceKey: string; etiqueta: string }>()
 
-  const { resources: funciones } = await caerus.getResourcesByGroup(GRUPO_FUNCIONES, {
-    pageSize: 200,
-  })
-  for (const f of funciones) {
-    const funcion = funcionFromResource(f)
-    index.set(f.id, { resourceKey: f.key, etiqueta: `Capacidad · ${funcion.titulo}` })
-
-    const { resources: butacas } = await caerus.getResourcesByGroup(grupoButacas(funcion.id), {
-      pageSize: 200,
-    })
-    for (const b of butacas) {
-      const butaca = butacaFromResource(b)
-      index.set(b.id, {
-        resourceKey: b.key,
-        etiqueta: `Butaca ${butaca.columna}${butaca.fila} · ${funcion.titulo}`,
+  for (const funcion of CATALOGO_FUNCIONES) {
+    try {
+      const { resources: butacas } = await caerus.getResourcesByGroup(grupoButacas(funcion.id), {
+        pageSize: 200,
       })
+      for (const b of butacas) {
+        const butaca = butacaFromResource(b)
+        index.set(b.id, {
+          resourceKey: b.key,
+          etiqueta: `Butaca ${butaca.columna}${butaca.fila} · ${funcion.titulo}`,
+        })
+      }
+    } catch {
+      // Silencioso si aún no fue sembrada
     }
   }
 

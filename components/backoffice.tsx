@@ -4,121 +4,71 @@ import { useEffect, useState } from 'react'
 import useSWR, { mutate as globalMutate } from 'swr'
 import {
   CheckCircle2,
-  Clock,
   Film,
   Loader2,
   Plus,
   Popcorn,
-  RefreshCw,
-  Eraser,
   PackagePlus,
   KeyRound,
   Trash2,
-  XCircle,
+  RotateCcw,
 } from 'lucide-react'
-import { cabecerasBackoffice, fetcher, formatPrecio, guardarTokenBackoffice, tokenBackoffice } from '@/lib/client'
+import { cabecerasBackoffice, fetcher, guardarTokenBackoffice, limpiarTodasLasCompras, tokenBackoffice } from '@/lib/client'
 import { cn } from '@/lib/utils'
-import type { FuncionDTO, HolderDTO, ProductoDTO } from '@/lib/cine'
+import type { FuncionDTO, ProductoDTO } from '@/lib/cine'
 
-type Estado = HolderDTO['status']
-
-const ESTADOS: { value: Estado | 'ALL'; label: string }[] = [
-  { value: 'ALL', label: 'Todos' },
-  { value: 'PENDING', label: 'Pendientes' },
-  { value: 'CONFIRMED', label: 'Confirmados' },
-  { value: 'RELEASED', label: 'Liberados' },
-  { value: 'EXPIRED', label: 'Vencidos' },
-  { value: 'QUEUED', label: 'En cola' },
-]
-
-const ESTILO_ESTADO: Record<Estado, { label: string; clase: string; Icon: typeof CheckCircle2 }> = {
-  PENDING: {
-    label: 'Pendiente',
-    clase: 'bg-status-pending/15 text-status-pending',
-    Icon: Clock,
-  },
-  CONFIRMED: {
-    label: 'Confirmado',
-    clase: 'bg-status-confirmed/15 text-status-confirmed',
-    Icon: CheckCircle2,
-  },
-  RELEASED: {
-    label: 'Liberado',
-    clase: 'bg-muted text-muted-foreground',
-    Icon: XCircle,
-  },
-  EXPIRED: {
-    label: 'Vencido',
-    clase: 'bg-destructive/15 text-destructive',
-    Icon: XCircle,
-  },
-  QUEUED: {
-    label: 'En cola',
-    clase: 'bg-status-queued/15 text-status-queued',
-    Icon: Clock,
-  },
-}
-
-function EstadoBadge({ estado }: { estado: Estado }) {
-  const cfg = ESTILO_ESTADO[estado] ?? ESTILO_ESTADO.RELEASED
-  const { Icon } = cfg
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${cfg.clase}`}
-    >
-      <Icon className="size-3" aria-hidden="true" />
-      {cfg.label}
-    </span>
-  )
-}
-
-function BotonSoltarTodo({ alTerminar }: { alTerminar: () => void }) {
+function BotonResetearTodo() {
   const bloqueado = useBloqueado()
   const [trabajando, setTrabajando] = useState(false)
   const [resultado, setResultado] = useState<string | null>(null)
 
-  async function soltar() {
+  async function resetear() {
+    if (
+      !window.confirm(
+        '¿Reiniciar todo el cine en Caerus? Esto liberará reservas en curso, borrará ventas y recreará todas las butacas y productos con los valores de config/sala.json.',
+      )
+    ) {
+      return
+    }
     setTrabajando(true)
     setResultado(null)
     try {
-      const res = await fetch('/api/backoffice/liberar-todo', { method: 'POST', headers: cabecerasBackoffice() })
-      const datos = (await res.json().catch(() => null)) as
-        | { liberados?: number; fallidos?: number; aviso?: string }
-        | null
-      setResultado(
-        res.status === 403
-          ? 'El token no coincide'
-          : res.ok && typeof datos?.liberados === 'number'
-            ? datos.aviso
-              ? `${datos.liberados} liberadas. ${datos.aviso}`
-              : datos.liberados === 0
-                ? 'No habia reservas en curso'
-                : `${datos.liberados} reservas liberadas`
-            : 'No se pudo liberar',
-      )
-      alTerminar()
+      const res = await fetch('/api/cine/reset', { method: 'POST' })
+      const datos = await res.json().catch(() => null)
+      if (res.ok && datos?.success) {
+        setResultado('Cine reiniciado a defaults')
+        limpiarTodasLasCompras()
+        for (const k of Object.keys(sessionStorage)) {
+          if (k.startsWith('caerus_reserva_') || k.startsWith('caerus_intento_')) {
+            sessionStorage.removeItem(k)
+          }
+        }
+      } else {
+        setResultado('Error al reiniciar')
+      }
     } finally {
       setTrabajando(false)
       globalMutate('/api/funciones')
+      globalMutate('/api/productos')
     }
   }
 
   return (
-    <div className="flex items-center gap-2">
-      {resultado ? <span className="text-xs text-muted-foreground">{resultado}</span> : null}
+    <div className="flex items-center gap-3">
+      {resultado ? <span className="text-xs font-medium text-emerald-400">{resultado}</span> : null}
       <button
         type="button"
-        onClick={soltar}
+        onClick={resetear}
         disabled={trabajando || bloqueado}
-        title="Libera todas las reservas en curso. No toca las compras confirmadas."
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:opacity-40"
+        title="Borra todas las reservas y compras en Caerus y reconstruye el inventario desde config/sala.json"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-40 cursor-pointer"
       >
         {trabajando ? (
           <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
         ) : (
-          <Eraser className="size-3.5" aria-hidden="true" />
+          <RotateCcw className="size-3.5" aria-hidden="true" />
         )}
-        Soltar reservas en curso
+        {trabajando ? 'Reiniciando Caerus…' : 'Resetear todo (Recrear sala)'}
       </button>
     </div>
   )
@@ -132,7 +82,7 @@ function FuncionesCargadas() {
   const [trabajando, setTrabajando] = useState<string | null>(null)
 
   async function eliminar(funcionId: string, titulo: string) {
-    if (!confirm(`¿Eliminar "${titulo}" y sus 54 butacas del motor?`)) return
+    if (!confirm(`¿Eliminar "${titulo}" y sus 30 butacas del motor?`)) return
     setTrabajando(funcionId)
     try {
       await fetch('/api/backoffice/funcion/eliminar', {
@@ -156,7 +106,7 @@ function FuncionesCargadas() {
         Funciones en cartelera
       </h2>
       <p className="mb-4 text-sm text-muted-foreground">
-        Eliminar borra la capacidad y las 54 butacas con deleteResource.
+        Eliminar borra la capacidad y las 30 butacas con deleteResource.
       </p>
       <ul className="flex flex-col gap-2">
         {funciones.map((f) => (
@@ -312,113 +262,26 @@ function CampoToken() {
 }
 
 export function Backoffice() {
-  const [filtro, setFiltro] = useState<Estado | 'ALL'>('ALL')
-  const auditUrl = `/api/backoffice/holders${filtro === 'ALL' ? '' : `?status=${filtro}`}`
-  const { data, isLoading, mutate } = useSWR<{ holders: HolderDTO[] }>(auditUrl, fetcher, {
-    refreshInterval: 3000,
-  })
-  const holders = data?.holders ?? []
   return (
     <div className="flex flex-col gap-8">
       <CampoToken />
+      <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card p-5">
+        <div>
+          <h2 className="font-display text-lg font-semibold text-foreground">
+            Estado de la sala (Demo)
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Reiniciá las butacas y el stock del candy bar a los valores iniciales de config/sala.json.
+          </p>
+        </div>
+        <BotonResetearTodo />
+      </section>
+      <FuncionesCargadas />
+      <StockCandy />
       <div className="grid gap-5 lg:grid-cols-2">
         <FuncionForm />
         <ProductoForm />
       </div>
-      <FuncionesCargadas />
-      <StockCandy />
-      <section className="rounded-2xl border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
-          <div>
-            <h2 className="font-display text-lg font-semibold text-foreground">
-              Auditoría de holders
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Cada reserva y venta que gestiona Caerus, en vivo.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <BotonSoltarTodo alTerminar={() => mutate()} />
-            <button
-              type="button"
-              onClick={() => mutate()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <RefreshCw className="size-3.5" aria-hidden="true" />
-              Refrescar
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2 border-b border-border p-4">
-          {ESTADOS.map((e) => (
-            <button
-              key={e.value}
-              type="button"
-              onClick={() => setFiltro(e.value)}
-              className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                filtro === e.value
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-secondary/60 text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {e.label}
-            </button>
-          ))}
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-5 py-3 font-medium">Recurso</th>
-                <th className="px-5 py-3 font-medium">Estado</th>
-                <th className="px-5 py-3 font-medium">Cantidad</th>
-                <th className="px-5 py-3 font-medium">Comprador</th>
-                <th className="px-5 py-3 font-medium">Vence / Confirmado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && holders.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
-                    <Loader2 className="mx-auto size-5 animate-spin" aria-hidden="true" />
-                  </td>
-                </tr>
-              ) : holders.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
-                    No hay holders para este filtro.
-                  </td>
-                </tr>
-              ) : (
-                holders.map((h) => (
-                  <tr
-                    key={h.id}
-                    className="border-b border-border/60 last:border-0 hover:bg-secondary/30"
-                  >
-                    <td className="px-5 py-3 text-foreground">
-                      {h.etiqueta ?? h.resourceKey ?? h.resourceId}
-                    </td>
-                    <td className="px-5 py-3">
-                      <EstadoBadge estado={h.status} />
-                    </td>
-                    <td className="px-5 py-3 tabular-nums text-muted-foreground">{h.amount}</td>
-                    <td className="px-5 py-3 text-muted-foreground">
-                      {String(h.metadata?.comprador ?? '—')}
-                    </td>
-                    <td className="px-5 py-3 tabular-nums text-muted-foreground">
-                      {new Date(h.expiresAt).toLocaleTimeString('es-AR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
   )
 }
@@ -485,7 +348,7 @@ function FuncionForm() {
         Nueva función
       </h2>
       <p className="-mt-2 text-sm text-muted-foreground">
-        Crea la capacidad y las 54 butacas de la sala en Caerus.
+        Crea la capacidad y las 30 butacas de la sala en Caerus.
       </p>
       <Campo label="Título">
         <input

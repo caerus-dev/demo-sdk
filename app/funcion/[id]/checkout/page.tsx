@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { Checkout } from '@/components/checkout'
 import { RegistroCaerus } from '@/components/registro-caerus'
+import { WebhookFeed } from '@/components/webhook-feed'
 import { IdentidadUsuario } from '@/components/identidad-usuario'
 
 export default async function CheckoutPage({ params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +21,10 @@ export default async function CheckoutPage({ params }: { params: Promise<{ id: s
       </h1>
       <IdentidadUsuario className="mb-6" />
       <Checkout funcionId={id} />
-      <RegistroCaerus className="mt-8" />
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <RegistroCaerus />
+        <WebhookFeed />
+      </div>
     </main>
   )
 }

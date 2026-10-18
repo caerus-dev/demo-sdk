@@ -7,6 +7,20 @@ const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dirCerts = join(raiz, 'certs')
 const env = { ...process.env }
 
+// Si PORT está definido en .env.local y no fue pasado por el entorno, usarlo
+if (!env.PORT) {
+  for (const envFile of ['.env.local', '.env']) {
+    const fullPath = join(raiz, envFile)
+    if (existsSync(fullPath)) {
+      const match = readFileSync(fullPath, 'utf8').match(/^PORT\s*=\s*(\d+)/m)
+      if (match) {
+        env.PORT = match[1]
+        break
+      }
+    }
+  }
+}
+
 if (existsSync(dirCerts)) {
   const pems = readdirSync(dirCerts).filter(
     (f) => (f.endsWith('.pem') || f.endsWith('.crt')) && !f.startsWith('.'),

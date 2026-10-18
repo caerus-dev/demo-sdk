@@ -30,7 +30,6 @@ export type CaerusApi = SharedResourceApi
 export const PLANTILLAS = {
   butaca: process.env.CAERUS_TEMPLATE_BUTACA ?? 'butaca',
   butacaFila: process.env.CAERUS_TEMPLATE_BUTACA_FILA ?? 'butaca_fila',
-  capacidad: process.env.CAERUS_TEMPLATE_CAPACIDAD ?? 'funcion_capacidad',
   producto: process.env.CAERUS_TEMPLATE_PRODUCTO ?? 'producto',
 } as const
 
@@ -46,8 +45,13 @@ function crearCliente(): SharedResourceApi {
     return new MotorEnMemoria()
   }
   const endpoint = process.env.CAERUS_ENDPOINT?.trim()
-  console.log(`[caerus] Conectado al motor desplegado${endpoint ? ` (${endpoint})` : ''}.`)
-  return new CaerusClient({ apiKey, ...(endpoint ? { endpoint } : {}) })
+  const tls = process.env.CAERUS_TLS === 'false' || process.env.CAERUS_TLS === '0' ? false : undefined
+  console.log(`[caerus] Conectado al motor desplegado${endpoint ? ` (${endpoint})` : ''}${tls === false ? ' (sin TLS)' : ''}.`)
+  return new CaerusClient({
+    apiKey,
+    ...(endpoint ? { endpoint } : {}),
+    ...(tls !== undefined ? { tls } : {}),
+  })
 }
 
 export const caerus: SharedResourceApi = globalForCaerus.__caerusCliente ?? observar(crearCliente())

@@ -2,7 +2,7 @@ import { Backoffice } from '@/components/backoffice'
 
 export const metadata = {
   title: 'Backoffice · Caerus Cine',
-  description: 'Gestión de funciones, candy bar y auditoría de reservas en vivo.',
+  description: 'Gestión de funciones, candy bar y reinicio del entorno de demo.',
 }
 
 export default function BackofficePage() {
@@ -13,8 +13,7 @@ export default function BackofficePage() {
           Backoffice
         </h1>
         <p className="mt-1 text-muted-foreground text-pretty">
-          Cargá funciones y productos, y seguí en vivo cómo Caerus reserva, confirma y libera cada
-          recurso.
+          Administrá funciones, stock del candy bar y el estado general de la sala para la demo.
         </p>
       </header>
       <Backoffice />

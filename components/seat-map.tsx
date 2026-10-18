@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { AlertTriangle, ArrowRight, Hourglass, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Hourglass, Loader2, RefreshCw } from 'lucide-react'
 import { Countdown } from '@/components/countdown'
 import {
   cerrarIntento,
+  conectarEventosWebhook,
   fetcher,
   formatPrecio,
   getSessionId,
+  getUsuarioActual,
   guardarReserva,
   intentoDe,
   leerReserva,
+  obtenerComprasUsuario,
   type ButacaEnFila,
   type ButacaReservada,
   type ReservaSesion,
@@ -27,7 +30,7 @@ interface Respuesta {
 }
 
 const COLS = ['A', 'B', 'C', 'D', 'E', 'F']
-const ROWS = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+const ROWS = [1, 2, 3, 4, 5]
 const SEAT = 40
 const GAP = 12
 const PAD_X = 36
@@ -38,10 +41,10 @@ const VIEW_H = PAD_TOP + ROWS.length * SEAT + (ROWS.length - 1) * GAP + 24
 
 export function SeatMap({ funcionId }: { funcionId: string }) {
   const router = useRouter()
-  const { data, mutate } = useSWR<Respuesta>(
+  const { data, mutate, isValidating } = useSWR<Respuesta>(
     `/api/funciones/${funcionId}/butacas`,
     fetcher,
-    { refreshInterval: 3000, refreshWhenHidden: true },
+    { refreshInterval: 2000, refreshWhenHidden: true },
   )
 
   const [reserva, setReserva] = useState<ReservaSesion>({
@@ -51,11 +54,16 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
   })
   const [conflictos, setConflictos] = useState<Set<string>>(new Set())
   const [soltando, setSoltando] = useState<Set<string>>(new Set())
+  const [compradasPorMi, setCompradasPorMi] = useState<Set<string>>(new Set())
   const [aviso, setAviso] = useState<string | null>(null)
   const [cargando, setCargando] = useState<string | null>(null)
+
   useEffect(() => {
     setReserva(leerReserva(funcionId))
+    const usuario = getUsuarioActual()
+    setCompradasPorMi(new Set(obtenerComprasUsuario(usuario.id, funcionId)))
   }, [funcionId])
+
   useEffect(() => {
     if (!data?.butacas) return
     setSoltando((prev) => {
@@ -102,139 +110,174 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     return next
   }, [])
 
+  // Suscripción reactiva a eventos Webhook de Caerus (SSE + sincronización compatible con Cloudflare Tunnel)
   useEffect(() => {
-    let vigente = true
+    return conectarEventosWebhook({
+      onWebhook: (payload) => {
+        try {
+          if (payload.eventType === 'system.reset') {
+            const limpia = { funcionId, butacas: [], productos: [] }
+            reservaRef.current = limpia
+            setReserva(limpia)
+            guardarReserva(limpia)
+            setCompradasPorMi(new Set())
+            void mutate()
+            return
+          }
 
-    async function revalidar() {
-      const actuales = reservaRef.current.butacas
-      if (actuales.length === 0) return
+          const prefijoFuncion = `funcion${funcionId}_`
+          if (!payload.resourceKey.startsWith(prefijoFuncion)) {
+            return
+          }
 
-      const ids = actuales
-        .flatMap((b) => [b.butacaHolderId, b.capacidadHolderId])
-        .filter(Boolean)
-      const res = await fetch(`/api/holders?ids=${ids.join(',')}`).catch(() => null)
-      if (!res || !vigente) return
+          // Refrescar el mapa ante cualquier evento que afecte a la sala
+          void mutate()
 
-      const { holders } = (await res.json().catch(() => ({ holders: [] }))) as {
-        holders: { id: string; status: string }[]
-      }
-      const estadoPorId = new Map(holders.map((h) => [h.id, h.status]))
-      const previa = reservaRef.current
-      const muertas = previa.butacas.filter((b) => {
-        const estado = estadoPorId.get(b.butacaHolderId)
-        return estado !== undefined && estado !== 'PENDING'
-      })
-      if (muertas.length === 0) return
+          const pKey = payload.resourceKey
+          const match = /funcion.+_([A-Z]\d+)/.exec(pKey)
+          const seatName = match ? match[1] : pKey
 
-      muertas.forEach((b) => cerrarIntento(funcionId, b.butacaKey))
-      const claves = new Set(muertas.map((b) => b.butacaKey))
-      const next = {
-        ...previa,
-        butacas: previa.butacas.filter((b) => !claves.has(b.butacaKey)),
-      }
-      reservaRef.current = next
-      setReserva(next)
-      guardarReserva(next)
-      setAviso(
-        muertas.length === 1
-          ? `La ${muertas[0]!.columna}${muertas[0]!.fila} ya no está reservada a tu nombre y volvió a estar libre.`
-          : 'Algunas de tus butacas ya no están reservadas y volvieron a estar libres.',
-      )
-      void mutate()
-    }
+          // 1. Manejo de expiración o liberación remota (Dashboard o abandono)
+          if (payload.eventType === 'resource.expired' || payload.eventType === 'resource.released') {
+            const previa = reservaRef.current
+            const tenia = previa.butacas.find(
+              (b) => (payload.holderId ? b.butacaHolderId === payload.holderId : b.butacaKey === pKey),
+            )
+            if (tenia) {
+              cerrarIntento(funcionId, tenia.butacaKey)
+              const next = {
+                ...previa,
+                butacas: previa.butacas.filter((b) => b.butacaKey !== tenia.butacaKey),
+              }
+              reservaRef.current = next
+              setReserva(next)
+              guardarReserva(next)
+              setAviso(
+                payload.eventType === 'resource.expired'
+                  ? `⏱️ Carrito expirado: La butaca ${seatName} venció y volvió a estar disponible.`
+                  : `🔓 Telemetría: La butaca ${seatName} fue liberada y vuelve a estar libre.`,
+              )
+            }
+          }
 
-    void revalidar()
-    const iv = setInterval(() => void revalidar(), 5000)
-    return () => {
-      vigente = false
-      clearInterval(iv)
-    }
-  }, [funcionId, mutate])
+          // 2. Promoción reactiva de la cola (QUEUED -> PENDING)
+          if (payload.eventType === 'resource.taken') {
+            const previa = reservaRef.current
+            const enEspera = (previa.enFila ?? []).find(
+              (b) => (payload.holderId ? b.butacaHolderId === payload.holderId : b.butacaKey === pKey),
+            )
+            if (enEspera) {
+              const nueva: ButacaReservada = {
+                butacaKey: enEspera.butacaKey,
+                butacaHolderId: payload.holderId || enEspera.butacaHolderId,
+                fila: enEspera.fila,
+                columna: enEspera.columna,
+                precio: enEspera.precio,
+                expiresAt: payload.expiresAt || new Date(Date.now() + 30000).toISOString(),
+              }
+              const next = {
+                ...previa,
+                butacas: [...previa.butacas.filter((b) => b.butacaKey !== enEspera.butacaKey), nueva],
+                enFila: (previa.enFila ?? []).filter((x) => x.butacaKey !== enEspera.butacaKey),
+              }
+              reservaRef.current = next
+              setReserva(next)
+              guardarReserva(next)
+              setAviso(`🎉 ¡Te tocó la butaca ${seatName}! La fila avanzó y la reserva es tuya.`)
+            }
+          }
+
+          // 3. Compra confirmada por otro: si yo estaba en la fila para esa butaca, se cancela mi espera
+          if (payload.eventType === 'resource.confirmed') {
+            const previa = reservaRef.current
+            const enEspera = (previa.enFila ?? []).find((b) => b.butacaKey === pKey)
+            if (enEspera) {
+              void fetch('/api/holders/liberar', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ holderIds: [enEspera.butacaHolderId] }),
+              }).catch(() => {})
+              persistir((prev) => ({
+                ...prev,
+                enFila: (prev.enFila ?? []).filter((x) => x.butacaKey !== pKey),
+              }))
+              setAviso(`❌ La butaca ${seatName} fue comprada por otro usuario. Tu lugar en la fila finalizó.`)
+            }
+          }
+        } catch (err) {
+          console.error('[SSE] Error procesando evento de webhook:', err)
+        }
+      },
+    })
+  }, [funcionId, mutate, persistir])
 
   const enFila = useMemo(() => reserva.enFila ?? [], [reserva])
-
   const enFilaSet = useMemo(() => new Set(enFila.map((b) => b.butacaKey)), [enFila])
+
+  // Polling exclusivo para detectar expiración de un holder mientras espera en la cola (QUEUED -> EXPIRED),
+  // ya que Caerus no emite el webhook resource.expired para la cola mientras no se libere stock.
+  // La promoción de QUEUED a PENDING se procesa por el Webhook resource.taken vía SSE.
   useEffect(() => {
     if (enFila.length === 0) return
 
-    let vigente = true
-
-    async function revisarFila() {
+    const timer = setInterval(async () => {
       const actuales = reservaRef.current.enFila ?? []
       if (actuales.length === 0) return
 
       const ids = actuales.map((b) => b.butacaHolderId).join(',')
-      const res = await fetch(`/api/holders?ids=${ids}`).catch(() => null)
-      if (!res || !vigente) return
+      try {
+        const res = await fetch(`/api/holders?ids=${ids}`)
+        if (!res.ok) return
+        const body = (await res.json()) as { holders: Array<{ id: string; status: string; expiresAt?: string }> }
+        const map = new Map(body.holders.map((h) => [h.id, h]))
 
-      const { holders } = (await res.json().catch(() => ({ holders: [] }))) as {
-        holders: { id: string; status: string }[]
+        actuales.forEach((espera) => {
+          const h = map.get(espera.butacaHolderId)
+          const match = /funcion.+_([A-Z]\d+)/.exec(espera.butacaKey)
+          const seatName = match ? match[1] : espera.butacaKey
+
+          if (!h || h.status === 'EXPIRED') {
+            // El motor Caerus marcó el holder como expirado (TTL de cola agotado)
+            persistir((prev) => ({
+              ...prev,
+              enFila: (prev.enFila ?? []).filter((x) => x.butacaKey !== espera.butacaKey),
+            }))
+            setAviso(`⏱️ Tiempo agotado en la fila: Expiró tu turno de espera para la butaca ${seatName}.`)
+            void mutate()
+          }
+        })
+      } catch (err) {
+        console.warn('[Queue polling] Error consultando estado:', err)
       }
-      const estadoPorId = new Map(holders.map((h) => [h.id, h.status]))
-      for (const espera of actuales) {
-        const estado = estadoPorId.get(espera.butacaHolderId)
-        if (estado === 'PENDING') {
-          const reclamo = await fetch(`/api/funciones/${funcionId}/reclamar-capacidad`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              butacaHolderId: espera.butacaHolderId,
-              butacaKey: espera.butacaKey,
-              sessionId: getSessionId(),
-              intento: intentoDe(funcionId, espera.butacaKey),
-            }),
-          }).catch(() => null)
-          if (!reclamo || !vigente) return
+    }, 2500)
 
-          const datos = (await reclamo.json().catch(() => null)) as
-            | { estado: string; capacidadHolderId?: string; expiresAt?: string }
-            | null
-          publicar('te toca', datos)
-          if (!datos || datos.estado !== 'RESERVADA') continue
+    return () => clearInterval(timer)
+  }, [enFila.length, mutate, persistir])
 
-          const nueva: ButacaReservada = {
-            butacaKey: espera.butacaKey,
-            butacaHolderId: espera.butacaHolderId,
-            capacidadHolderId: datos.capacidadHolderId!,
-            fila: espera.fila,
-            columna: espera.columna,
-            precio: espera.precio,
-            expiresAt: datos.expiresAt!,
-          }
-          const previa = reservaRef.current
-          const next = {
-            ...previa,
-            butacas: [...previa.butacas, nueva],
-            enFila: (previa.enFila ?? []).filter((x) => x.butacaKey !== espera.butacaKey),
-          }
-          reservaRef.current = next
-          setReserva(next)
-          guardarReserva(next)
-          setAviso(`Te tocó la ${espera.columna}${espera.fila}: la fila avanzó y es tuya.`)
-          void mutate()
-          continue
-        }
-        if (estado && estado !== 'QUEUED') {
-          cerrarIntento(funcionId, espera.butacaKey)
-          const previa = reservaRef.current
-          const next = {
-            ...previa,
-            enFila: (previa.enFila ?? []).filter((x) => x.butacaKey !== espera.butacaKey),
-          }
-          reservaRef.current = next
-          setReserva(next)
-          guardarReserva(next)
-          setAviso(`Se venció tu lugar en la fila para la ${espera.columna}${espera.fila}.`)
-        }
+  // Si la butaca para la que estaba en cola fue comprada por otro (confirmada), cancelar mi espera
+  useEffect(() => {
+    if (!data?.butacas) return
+    const actuales = reservaRef.current.enFila ?? []
+    if (actuales.length === 0) return
+
+    actuales.forEach((espera) => {
+      const b = data.butacas.find((sb) => sb.key === espera.butacaKey)
+      if (b && b.estado === 'CONFIRMADA') {
+        const match = /funcion.+_([A-Z]\d+)/.exec(espera.butacaKey)
+        const seatName = match ? match[1] : espera.butacaKey
+        void fetch('/api/holders/liberar', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ holderIds: [espera.butacaHolderId] }),
+        }).catch(() => {})
+        persistir((prev) => ({
+          ...prev,
+          enFila: (prev.enFila ?? []).filter((x) => x.butacaKey !== espera.butacaKey),
+        }))
+        setAviso(`❌ La butaca ${seatName} fue comprada definitivamente. Tu lugar en la fila finalizó.`)
       }
-    }
-    void revisarFila()
-    const iv = setInterval(() => void revisarFila(), 2500)
-    return () => {
-      vigente = false
-      clearInterval(iv)
-    }
-  }, [enFila.length, funcionId, mutate])
+    })
+  }, [data, persistir])
 
   const proximaExpiracion = useMemo(() => {
     if (reserva.butacas.length === 0) return null
@@ -258,15 +301,25 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     guardarReserva(next)
     setAviso(
       vivas.length === 0
-        ? 'Se venció el tiempo de tu reserva. Las butacas volvieron a estar libres.'
-        : 'Se venció una de tus butacas y volvió a estar libre. Las demás siguen reservadas.',
+        ? 'Se venció el tiempo de tu reserva y las butacas volvieron a estar libres.'
+        : 'Se venció el tiempo de algunas de tus butacas y volvieron a estar libres.',
     )
     void mutate()
-  }, [mutate, funcionId])
+  }, [funcionId, mutate])
 
-  async function reservar(butaca: ButacaDTO) {
-    setAviso(null)
+  async function onSeatClick(butaca: ButacaDTO) {
+    if (cargando) return
+    if (seleccionadas.has(butaca.key)) {
+      await liberar(butaca.key)
+      return
+    }
     setCargando(butaca.key)
+    setConflictos((prev) => {
+      if (!prev.has(butaca.key)) return prev
+      const next = new Set(prev)
+      next.delete(butaca.key)
+      return next
+    })
     try {
       const res = await fetch(`/api/funciones/${funcionId}/reservar-butaca`, {
         method: 'POST',
@@ -282,14 +335,13 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         | {
             estado: 'RESERVADA' | 'EN_FILA'
             butacaHolderId: string
-            capacidadHolderId?: string
             expiresAt?: string
           }
         | null
       publicar('reservar', json)
       if (res.status === 409) {
         setConflictos((prev) => new Set(prev).add(butaca.key))
-        setAviso('Esa butaca la acaba de tomar otra persona')
+        setAviso('Esa butaca la acaba de tomar otra persona.')
         void mutate()
         return
       }
@@ -304,6 +356,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
           fila: butaca.fila,
           columna: butaca.columna,
           precio: butaca.precio,
+          expiresAt: json.expiresAt,
         }
         persistir((previa) => ({ ...previa, enFila: [...(previa.enFila ?? []), enEspera] }))
         setAviso('Esa butaca está tomada. Quedaste en la fila: si no la pagan, es tuya.')
@@ -314,7 +367,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
       const nueva: ButacaReservada = {
         butacaKey: butaca.key,
         butacaHolderId: json.butacaHolderId,
-        capacidadHolderId: json.capacidadHolderId!,
         fila: butaca.fila,
         columna: butaca.columna,
         precio: butaca.precio,
@@ -335,128 +387,174 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     setCargando(butacaKey)
     cerrarIntento(funcionId, butacaKey)
     setSoltando((prev) => new Set(prev).add(butacaKey))
+
+    // Quitar inmediatamente de la selección local para respuesta visual instantánea
     persistir((previa) => ({
       ...previa,
       butacas: previa.butacas.filter((b) => b.butacaKey !== butacaKey),
     }))
+
     try {
       const res = await fetch('/api/holders/liberar', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          holderIds: [target.butacaHolderId, target.capacidadHolderId],
+          holderIds: [target.butacaHolderId],
         }),
       })
       publicar('quitar', await res.json().catch(() => null))
-      if (!res.ok) throw new Error('no se pudo soltar')
-    } catch {
-      setSoltando((prev) => {
-        const siguen = new Set(prev)
-        siguen.delete(butacaKey)
-        return siguen
-      })
-      persistir((previa) =>
-        previa.butacas.some((b) => b.butacaKey === butacaKey)
-          ? previa
-          : { ...previa, butacas: [...previa.butacas, target] },
-      )
-      setAviso('No pudimos soltar esa butaca. Sigue siendo tuya.')
+    } catch (err) {
+      console.warn('[liberar] error al liberar en servidor:', err)
     } finally {
+      await mutate()
+      setSoltando((prev) => {
+        const next = new Set(prev)
+        next.delete(butacaKey)
+        return next
+      })
       setCargando(null)
-      void mutate()
     }
   }
 
-  function onSeatClick(butaca: ButacaDTO) {
-    if (seleccionadas.has(butaca.key)) {
-      void liberar(butaca.key)
-      return
-    }
-    void reservar(butaca)
-  }
+  const subtotal = reserva.butacas.reduce((acc, b) => acc + b.precio, 0)
 
-  const total = reserva.butacas.reduce((acc, b) => acc + b.precio, 0)
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
       <div>
         {aviso ? (
           <div
-            role="alert"
-            className="mb-4 flex items-start gap-2.5 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 text-sm text-primary"
+            role="status"
+            className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 p-4 text-sm text-foreground"
           >
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <span>{aviso}</span>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <span>{aviso}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAviso(null)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Cerrar
+            </button>
           </div>
         ) : null}
-        <div className="rounded-2xl border border-border bg-card p-4 sm:p-6">
+
+        <div className="relative rounded-2xl border border-border bg-card p-6 shadow-xs">
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Sala en vivo · {data?.funcion.titulo}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void mutate()}
+                title="Sincronizar mapa"
+                className="rounded-md border border-border p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RefreshCw className={cn('size-3.5', isValidating && 'animate-spin')} />
+              </button>
+            </div>
+          </div>
+
           <svg
             viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-            className="mx-auto h-auto w-full max-w-md"
-            role="group"
+            className="mx-auto block h-auto w-full max-w-[560px]"
             aria-label="Mapa de butacas"
           >
-
+            {/* Pantalla curva */}
             <path
-              d={`M ${PAD_X} 46 Q ${VIEW_W / 2} 20 ${VIEW_W - PAD_X} 46`}
+              d={`M ${PAD_X} 36 Q ${VIEW_W / 2} 12 ${VIEW_W - PAD_X} 36`}
               fill="none"
-              stroke="var(--primary)"
-              strokeWidth="3"
+              stroke="color-mix(in oklch, var(--primary) 45%, transparent)"
+              strokeWidth={3}
               strokeLinecap="round"
             />
             <text
               x={VIEW_W / 2}
-              y={30}
+              y={26}
               textAnchor="middle"
-              className="fill-muted-foreground"
-              style={{ fontSize: 11, letterSpacing: 2 }}
+              className="fill-muted-foreground font-mono"
+              style={{ fontSize: 9, letterSpacing: '0.25em' }}
             >
               PANTALLA
             </text>
-            {COLS.map((c, ci) => (
-              <text
-                key={c}
-                x={PAD_X + ci * (SEAT + GAP) + SEAT / 2}
-                y={PAD_TOP - 12}
-                textAnchor="middle"
-                className="fill-muted-foreground"
-                style={{ fontSize: 11 }}
-              >
-                {c}
-              </text>
-            ))}
+
+            {/* Grilla de butacas */}
             {ROWS.map((r, ri) =>
               COLS.map((c, ci) => {
                 const key = `funcion${funcionId}_${c}${r}`
                 const butaca = butacasPorKey.get(key)
+                const usuarioActual = getUsuarioActual()
+                const isSel = seleccionadas.has(key)
+                const isMiaComprada = Boolean(
+                  butaca &&
+                  butaca.estado === 'CONFIRMADA' &&
+                  (butaca.usuarioId === usuarioActual.id || compradasPorMi.has(key)),
+                )
+                const isFila = enFilaSet.has(key)
+                const isSoltando = soltando.has(key)
+                const isConflicto = conflictos.has(key)
+                const isVendidaDefinitiva = Boolean(
+                  butaca && butaca.estado === 'CONFIRMADA' && !isSel && !isMiaComprada,
+                )
+                const ocupada = Boolean(
+                  !isSel &&
+                  !isMiaComprada &&
+                  !isFila &&
+                  !isSoltando &&
+                  !isVendidaDefinitiva &&
+                  (isConflicto || (butaca ? !butaca.disponible : false)),
+                )
+                const isLoading = cargando === key
+                const esQueue = data?.funcion.politica === 'QUEUE'
+
                 const x = PAD_X + ci * (SEAT + GAP)
                 const y = PAD_TOP + ri * (SEAT + GAP)
 
-                const isSel = seleccionadas.has(key)
-                const isFila = enFilaSet.has(key)
-                const isConflict = conflictos.has(key)
-                const ocupada =
-                  !isSel &&
-                  !isFila &&
-                  !soltando.has(key) &&
-                  (isConflict || (butaca ? !butaca.disponible : false))
-                const isLoading = cargando === key
-
                 let fill = 'var(--secondary)'
                 let stroke = 'var(--border)'
-                if (isSel) {
+                if (isConflicto) {
+                  fill = 'color-mix(in oklch, var(--destructive) 35%, var(--card))'
+                  stroke = 'var(--destructive)'
+                } else if (isSoltando) {
+                  fill = 'color-mix(in oklch, var(--secondary) 60%, var(--card))'
+                  stroke = 'var(--border)'
+                } else if (isMiaComprada) {
+                  fill = '#10b981'
+                  stroke = '#059669'
+                } else if (isSel) {
                   fill = 'var(--primary)'
-                  stroke = 'var(--primary)'
+                  stroke = 'color-mix(in oklch, var(--primary) 70%, black)'
                 } else if (isFila) {
                   fill = 'color-mix(in oklch, var(--status-queued) 25%, var(--card))'
                   stroke = 'var(--status-queued)'
+                } else if (isVendidaDefinitiva) {
+                  fill = 'oklch(0.18 0.005 60)'
+                  stroke = 'oklch(1 0 0 / 8%)'
                 } else if (ocupada) {
-                  fill = 'color-mix(in oklch, var(--destructive) 22%, var(--card))'
-                  stroke = 'color-mix(in oklch, var(--destructive) 45%, transparent)'
+                  fill = 'color-mix(in oklch, var(--destructive) 25%, var(--card))'
+                  stroke = 'var(--destructive)'
                 }
+
                 return (
                   <g key={key}>
                     {butaca ? (
-                      <title>{`${c}${r} · ${formatPrecio(butaca.precio)}`}</title>
+                      <title>{`${c}${r} · ${formatPrecio(butaca.precio)}${
+                        isMiaComprada
+                          ? ` (Tu compra confirmada${butaca.comprador ? ` · ${butaca.comprador}` : ''})`
+                          : isSel
+                            ? ' (En tu carrito - Pending con timer)'
+                            : isFila
+                              ? ' (En la fila de espera)'
+                              : isVendidaDefinitiva
+                                ? ` (Vendida${butaca.comprador ? ` a ${butaca.comprador}` : ' a otro'} · Confirmada definitiva)`
+                                : ocupada
+                                  ? esQueue
+                                    ? ' (En carrito de otro · ¡Click para sumarte a la fila!)'
+                                    : ' (En carrito de otro · Bloqueo temporal con timer)'
+                                  : ' (Libre)'
+                      }`}</title>
                     ) : null}
                     <rect
                       x={x}
@@ -469,23 +567,67 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                       strokeWidth={1.5}
                       strokeDasharray={isFila ? '4 3' : undefined}
                       role="button"
-                      tabIndex={ocupada || isFila ? -1 : 0}
+                      tabIndex={isVendidaDefinitiva || isMiaComprada || isFila || isSoltando ? -1 : 0}
                       aria-label={`Butaca ${c}${r}${
-                        isSel
-                          ? ', seleccionada'
-                          : isFila
-                            ? ', en la fila'
-                            : ocupada
-                              ? ', ocupada'
-                              : ', libre'
+                        isMiaComprada
+                          ? ', compra confirmada'
+                          : isSel
+                            ? ', en tu carrito'
+                            : isFila
+                              ? ', en la fila'
+                              : isVendidaDefinitiva
+                                ? ', vendida'
+                                : ocupada
+                                  ? ', ocupada'
+                                  : ', libre'
                       }`}
-                      aria-disabled={ocupada || isFila}
-                      style={{ cursor: ocupada || isFila || isLoading ? 'not-allowed' : 'pointer' }}
-                      onClick={() => !ocupada && !isFila && !isLoading && butaca && onSeatClick(butaca)}
-                      onKeyDown={(e) => {
-                        if ((e.key === 'Enter' || e.key === ' ') && !ocupada && !isFila && butaca) {
-                          e.preventDefault()
+                      aria-disabled={isVendidaDefinitiva || isMiaComprada || isFila || isSoltando}
+                      style={{
+                        cursor:
+                          isVendidaDefinitiva || isMiaComprada || isFila || isLoading || isSoltando
+                            ? 'not-allowed'
+                            : 'pointer',
+                      }}
+                      onClick={() => {
+                        if (isMiaComprada) {
+                          setAviso('Ya compraste esta butaca. Tu ticket está confirmado.')
+                          return
+                        }
+                        if (isVendidaDefinitiva) {
+                          setAviso(
+                            `Esta butaca ya fue vendida y confirmada${
+                              butaca?.comprador ? ` por ${butaca.comprador}` : ' por otro usuario'
+                            }. No admite lista de espera.`,
+                          )
+                          return
+                        }
+                        if (isSoltando || isLoading) {
+                          return
+                        }
+                        if (isSel) {
+                          void liberar(key)
+                          return
+                        }
+                        if (!isFila && butaca) {
                           onSeatClick(butaca)
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          (e.key === 'Enter' || e.key === ' ') &&
+                          !isVendidaDefinitiva &&
+                          !isMiaComprada &&
+                          !isFila &&
+                          !isSoltando &&
+                          !isLoading &&
+                          butaca
+                        ) {
+                          e.preventDefault()
+                          if (isSel) {
+                            void liberar(key)
+                          } else {
+                            onSeatClick(butaca)
+                          }
                         }
                       }}
                     />
@@ -494,32 +636,45 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                       y={y + SEAT / 2 + 4}
                       textAnchor="middle"
                       pointerEvents="none"
-                      style={{ fontSize: 10, fontWeight: 600 }}
+                      style={{
+                        fontSize: isVendidaDefinitiva ? 11 : 10,
+                        fontWeight: isVendidaDefinitiva ? 700 : 600,
+                      }}
                       fill={
-                        isSel
-                          ? 'var(--primary-foreground)'
-                          : isFila
-                            ? 'var(--status-queued)'
-                            : ocupada
-                              ? 'color-mix(in oklch, var(--destructive) 70%, var(--foreground))'
-                              : 'var(--muted-foreground)'
+                        isMiaComprada
+                          ? '#ffffff'
+                          : isSel
+                            ? 'var(--primary-foreground)'
+                            : isFila
+                              ? 'var(--status-queued)'
+                              : isVendidaDefinitiva
+                                ? 'oklch(0.45 0.01 60)'
+                                : isSoltando
+                                  ? 'var(--muted-foreground)'
+                                  : ocupada
+                                    ? 'color-mix(in oklch, var(--destructive) 70%, var(--foreground))'
+                                    : 'var(--muted-foreground)'
                       }
                     >
-                      {isLoading ? '···' : `${c}${r}`}
+                      {isVendidaDefinitiva ? '✕' : isLoading || isSoltando ? '···' : `${c}${r}`}
                     </text>
                   </g>
                 )
               }),
             )}
           </svg>
+
           <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
-            <Legend swatch="bg-secondary border-border" label="Libre" />
-            <Legend swatch="bg-primary border-primary" label="Tu selección" />
-            <Legend swatch="border-destructive/50 bg-destructive/20" label="Ocupada" />
-            <Legend swatch="border-status-queued bg-status-queued/25 border-dashed" label="En la fila" />
+            <Legend swatch="bg-secondary border-border" label="Libre (Gris)" />
+            <Legend swatch="bg-primary border-primary text-primary-foreground font-medium" label="En tu carrito (Amarillo · Pending)" />
+            <Legend swatch="bg-[#10b981] border-[#059669] text-white font-medium" label="Tu compra (Verde · Confirmed)" />
+            <Legend swatch="border-destructive/60 bg-destructive/25 text-red-400" label="En carrito de otro (Roja · Disputable)" />
+            <Legend swatch="bg-black/60 border-white/10 text-zinc-500 font-bold" icon="✕" label="Vendida a otro (Gris ✕ · Definitiva)" />
+            <Legend swatch="border-status-queued bg-status-queued/25 border-dashed text-sky-400" label="En la fila (Celeste · Queued)" />
           </div>
         </div>
       </div>
+
       <aside className="lg:sticky lg:top-24 lg:self-start">
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -528,6 +683,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
               <Countdown expiresAt={proximaExpiracion} onExpire={onExpire} size="sm" />
             ) : null}
           </div>
+
           {enFila.length > 0 ? (
             <div className="mb-4 rounded-lg border border-status-queued/40 bg-status-queued/10 p-3">
               <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-status-queued">
@@ -546,80 +702,91 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                 ))}
               </ul>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                No la perdiste. Si quien la tiene no paga, el motor te la asigna sola.
+                No la perdiste. Si quien la tiene no paga o la libera, el motor te la asigna reactivamente por Webhook.
               </p>
             </div>
           ) : null}
+
           {reserva.butacas.length === 0 && enFila.length === 0 ? (
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Tocá una butaca libre para reservarla al instante. Se guarda por unos minutos
-              con un temporizador; si se vence, vuelve a estar disponible para todos.
+              Tocá una butaca libre para reservarla al instante. El temporizador es gestionado por Caerus; si expira,
+              el motor emite un Webhook y vuelve a estar libre automáticamente.
             </p>
           ) : reserva.butacas.length === 0 ? null : (
             <>
               <ul className="mb-4 flex flex-col gap-2">
-                {reserva.butacas
-                  .slice()
-                  .sort((a, b) => a.columna.localeCompare(b.columna) || a.fila - b.fila)
-                  .map((b) => (
-                    <li
-                      key={b.butacaKey}
-                      className="flex items-center justify-between rounded-lg bg-secondary/60 px-3 py-2 text-sm"
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="inline-flex size-7 items-center justify-center rounded-md bg-primary/20 font-semibold text-primary">
-                          {b.columna}
-                          {b.fila}
-                        </span>
+                {reserva.butacas.map((b) => (
+                  <li
+                    key={b.butacaKey}
+                    className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm"
+                  >
+                    <span>
+                      Butaca{' '}
+                      <span className="font-semibold text-foreground">
+                        {b.columna}
+                        {b.fila}
                       </span>
-                      <span className="flex items-center gap-3">
-                        <span className="font-medium text-foreground">
-                          {formatPrecio(b.precio)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => liberar(b.butacaKey)}
-                          className="text-xs text-muted-foreground underline-offset-4 hover:text-destructive hover:underline"
-                        >
-                          quitar
-                        </button>
-                      </span>
-                    </li>
-                  ))}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-foreground">{formatPrecio(b.precio)}</span>
+                      <button
+                        type="button"
+                        onClick={() => void liberar(b.butacaKey)}
+                        disabled={cargando === b.butacaKey}
+                        title="Liberar el lock en Caerus inmediatamente"
+                        className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Liberar
+                      </button>
+                    </div>
+                  </li>
+                ))}
               </ul>
-              <div className="mb-4 flex items-center justify-between border-t border-border pt-3 text-sm">
-                <span className="text-muted-foreground">Subtotal butacas</span>
-                <span className="font-display text-lg font-semibold text-foreground">
-                  {formatPrecio(total)}
+
+              <div className="mb-5 flex items-baseline justify-between border-t border-border pt-3">
+                <span className="text-sm text-muted-foreground">Subtotal</span>
+                <span className="font-display text-xl font-bold text-foreground">
+                  {formatPrecio(subtotal)}
                 </span>
               </div>
+
               <button
                 type="button"
                 onClick={() => router.push(`/funcion/${funcionId}/checkout`)}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
-                Continuar al checkout
+                <span>Continuar al checkout</span>
                 <ArrowRight className="size-4" aria-hidden="true" />
               </button>
             </>
           )}
-          {cargando ? (
-            <p className="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-              procesando…
-            </p>
-          ) : null}
         </div>
       </aside>
     </div>
   )
 }
 
-function Legend({ swatch, label }: { swatch: string; label: string }) {
+function Legend({
+  swatch,
+  label,
+  icon,
+}: {
+  swatch: string
+  label: string
+  icon?: React.ReactNode
+}) {
   return (
-    <span className="flex items-center gap-2">
-      <span className={cn('size-3.5 rounded border', swatch)} />
-      {label}
-    </span>
+    <div className="flex items-center gap-2">
+      <span
+        className={cn(
+          'flex size-3.5 items-center justify-center rounded-sm border text-[9px] leading-none',
+          swatch,
+        )}
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
+      <span>{label}</span>
+    </div>
   )
 }

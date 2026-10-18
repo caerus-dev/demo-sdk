@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { caerus, conRegistro, type LlamadaSDK } from '@/lib/caerus'
-import { ensureSeed, infoKey, meta } from '@/lib/cine'
+import { ensureSeed, meta, SALA_CONFIG } from '@/lib/cine'
 import { errorResponse, esClaveValida, exigirHolderVivo } from '@/lib/api'
 
 export const runtime = 'nodejs'
@@ -24,45 +24,46 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     const sufijo = intento ?? sessionId
+    const ttlSeconds = Number(process.env.CAERUS_TTL_SECONDS) || SALA_CONFIG.ttlSecondsDefault || 30
 
-    const resultado = await conRegistro(llamadas, async () => {
-      const butacaHolder = await caerus.unitary(butacaKey).take({
+    const usuarioNombre =
+      sessionId === 'user_beto'
+        ? 'Beto Pérez'
+        : sessionId === 'user_carlos'
+          ? 'Carlos Gómez'
+          : sessionId === 'user_diana'
+            ? 'Diana Prince'
+            : 'Ana García'
+
+    const butacaHolder = await conRegistro(llamadas, async () => {
+      const holder = await caerus.unitary(butacaKey).take({
         idempotencyKey: `${sessionId}:${butacaKey}:${sufijo}`,
-        ttlSeconds: 120,
-        ...meta({ butacaKey, funcionId: id }),
+        ttlSeconds,
+        ...meta({
+          butacaKey,
+          funcionId: id,
+          usuarioId: sessionId,
+          comprador: usuarioNombre,
+        }),
       })
-      exigirHolderVivo(butacaHolder, butacaKey)
-      if (butacaHolder.status === 'QUEUED') {
-        return { butacaHolder, capacidadHolder: null }
-      }
-      try {
-        const capacidadHolder = await caerus.pooled(infoKey(id)).takeMany(1, {
-          idempotencyKey: `${sessionId}:${infoKey(id)}:${butacaKey}:${sufijo}`,
-          ttlSeconds: 120,
-          ...meta({ butacaKey, funcionId: id }),
-        })
-        exigirHolderVivo(capacidadHolder, infoKey(id))
-        return { butacaHolder, capacidadHolder }
-      } catch (error) {
-        await caerus.release(butacaHolder.id).catch(() => {})
-        throw error
-      }
+      exigirHolderVivo(holder, butacaKey)
+      return holder
     })
 
-    const { butacaHolder, capacidadHolder } = resultado
-    if (!capacidadHolder) {
+    if (butacaHolder.status === 'QUEUED') {
       return NextResponse.json({
         butacaKey,
         estado: 'EN_FILA',
         butacaHolderId: butacaHolder.id,
+        expiresAt: butacaHolder.expiresAt?.toISOString(),
         _llamadas: llamadas,
       })
     }
+
     return NextResponse.json({
       butacaKey,
       estado: 'RESERVADA',
       butacaHolderId: butacaHolder.id,
-      capacidadHolderId: capacidadHolder.id,
       expiresAt: butacaHolder.expiresAt.toISOString(),
       _llamadas: llamadas,
     })
