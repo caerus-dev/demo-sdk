@@ -48,17 +48,32 @@ async function buildRefIndex(): Promise<Map<string, { resourceKey: string; etiqu
 export async function GET(req: Request) {
   try {
     await ensureSeed()
-    const statusParam = new URL(req.url).searchParams.get('status')
+    const url = new URL(req.url)
+    const statusParam = url.searchParams.get('status')
     const status = ESTADOS.includes(statusParam as ResourceHolderStatus)
       ? (statusParam as ResourceHolderStatus)
       : undefined
 
-    const [{ holders }, refIndex] = await Promise.all([
-      caerus.listResourceHolders({ status, sort: 'NEWEST_FIRST', pageSize: 500 }),
+    const pageParam = parseInt(url.searchParams.get('page') ?? '1', 10)
+    const pagina = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1
+
+    const pageSizeParam = parseInt(url.searchParams.get('pageSize') ?? '15', 10)
+    const pageSize = Number.isInteger(pageSizeParam) && pageSizeParam > 0 ? pageSizeParam : 15
+
+    const [{ holders, hasNextPage }, refIndex] = await Promise.all([
+      caerus.listResourceHolders({
+        status,
+        sort: 'NEWEST_FIRST',
+        page: pagina - 1,
+        pageSize,
+      }),
       buildRefIndex(),
     ])
     return NextResponse.json({
       holders: holders.map((h) => holderToDTO(h, refIndex.get(h.resourceId))),
+      page: pagina,
+      pageSize,
+      hasNextPage,
     })
   } catch (error) {
     return errorResponse(error)

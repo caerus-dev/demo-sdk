@@ -328,7 +328,7 @@ export class MotorEnMemoria implements SharedResourceApi {
   }): Promise<ResourceHolderPage> {
     sweepExpired()
     const state = getState()
-    const page = Math.max(1, options?.page ?? 1)
+    const page = Math.max(0, options?.page ?? 0)
     const pageSize = Math.max(1, options?.pageSize ?? 50)
     const sort = options?.sort ?? 'NEWEST_FIRST'
 
@@ -343,7 +343,7 @@ export class MotorEnMemoria implements SharedResourceApi {
       sort === 'NEWEST_FIRST' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt,
     )
 
-    const start = (page - 1) * pageSize
+    const start = page * pageSize
     const slice = all.slice(start, start + pageSize)
     return {
       holders: slice.map(toHolder),

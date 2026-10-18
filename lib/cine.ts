@@ -416,6 +416,23 @@ export async function crearProducto(input: {
   return { key }
 }
 
+export async function eliminarProducto(key: string): Promise<void> {
+  try {
+    await caerus.deleteResource(key)
+  } catch (err) {
+    const { holders } = await caerus
+      .listResourceHolders({ resourceKey: key, pageSize: 50 })
+      .catch(() => ({ holders: [] }))
+    const pendientes = holders.filter((h) => h.status === 'PENDING' || h.status === 'QUEUED')
+    if (pendientes.length > 0) {
+      await Promise.allSettled(pendientes.map((h) => caerus.release(h.id)))
+      await caerus.deleteResource(key)
+    } else {
+      throw err
+    }
+  }
+}
+
 export interface ButacaDTO {
   key: string
   fila: number
