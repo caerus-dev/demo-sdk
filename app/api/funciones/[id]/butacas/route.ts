@@ -9,13 +9,15 @@ import { errorResponse } from '@/lib/api'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await ensureSeed()
     const { id } = await params
     const f = catalogoFuncion(id)
+    const url = new URL(req.url)
+    const usuarioId = url.searchParams.get('usuarioId') ?? undefined
 
-    const butacas = await obtenerButacasFuncion(id)
+    const { butacas, miEstado } = await obtenerButacasFuncion(id, usuarioId)
     const disponibles = butacas.filter((b) => b.disponible).length
 
     return NextResponse.json({
@@ -30,6 +32,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         capacidadTotal: butacas.length,
       },
       butacas,
+      miEstado,
     })
   } catch (error) {
     return errorResponse(error)

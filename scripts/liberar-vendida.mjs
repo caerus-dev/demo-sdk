@@ -67,7 +67,7 @@ try {
   console.log('Esperando a que se asiente el índice de grupos…')
   await esperar(9000)
   await c.createUnitary('butaca', butacaKey, {
-    groupKey: `funcion${idFuncion}`,
+    groupKey: idFuncion.replace(/^funcion/, ''),
     ...meta({
       fila,
       columna,

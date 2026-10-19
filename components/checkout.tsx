@@ -45,19 +45,106 @@ export function Checkout({ funcionId }: { funcionId: string }) {
   const [trabajando, setTrabajando] = useState<string | null>(null)
 
   useEffect(() => {
-    setReserva(leerReserva(funcionId))
+    const previa = leerReserva(funcionId)
+    setReserva(previa)
     const usuario = getUsuarioActual()
     setComprador(usuario.nombre)
+
+    // Validar con Caerus que los holders sigan vigentes (por si se liberaron antes de entrar al checkout)
+    const ids = [
+      ...previa.butacas.map((b) => b.butacaHolderId),
+      ...previa.productos.map((p) => p.holderId),
+    ].filter(Boolean)
+
+    if (ids.length > 0) {
+      void fetch(`/api/holders?ids=${ids.join(',')}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { holders?: Array<{ id: string; status: string }> } | null) => {
+          if (!data?.holders) return
+          const validos = new Set(
+            data.holders.filter((h) => h.status === 'PENDING').map((h) => h.id),
+          )
+          const butacasVigentes = previa.butacas.filter((b) => validos.has(b.butacaHolderId))
+          const productosVigentes = previa.productos.filter((p) => validos.has(p.holderId))
+
+          if (butacasVigentes.length !== previa.butacas.length) {
+            const next = { ...previa, butacas: butacasVigentes, productos: productosVigentes }
+            reservaRef.current = next
+            setReserva(next)
+            guardarReserva(next)
+
+            if (butacasVigentes.length === 0) {
+              setAviso('Tu reserva de butacas ya no está vigente en el sistema. Volvé a elegirlas.')
+            } else {
+              setAviso('Algunas de tus butacas ya no estaban vigentes y fueron removidas del carrito.')
+            }
+          }
+        })
+        .catch(() => {})
+    }
   }, [funcionId])
 
-  // Escuchar eventos de webhook para refrescar stock en vivo (SSE + compatibilidad con túneles)
+  // Escuchar eventos de webhook para refrescar stock en vivo y reaccionar si se libera un holder (SSE)
   useEffect(() => {
     return conectarEventosWebhook({
-      onWebhook: () => {
-        void mutateProductos()
+      onWebhook: (payload) => {
+        try {
+          // 1. Refrescar stock de productos
+          void mutateProductos()
+
+          // 2. Manejo de reinicio del sistema
+          if (payload.eventType === 'system.reset') {
+            limpiarReserva(funcionId)
+            setAviso('El sistema fue reiniciado. Volviendo a la sala...')
+            setTimeout(() => router.push(`/funcion/${funcionId}`), 1500)
+            return
+          }
+
+          // 3. Manejo de expiración o liberación remota (Dashboard o pestaña manual)
+          if (payload.eventType === 'resource.expired' || payload.eventType === 'resource.released') {
+            const previa = reservaRef.current
+            const matchSeat = /([A-Z]\d+)$/.exec(payload.resourceKey)
+            const seatName = matchSeat ? matchSeat[1] : payload.resourceKey
+
+            const teniaButaca = previa.butacas.find(
+              (b) => (payload.holderId ? b.butacaHolderId === payload.holderId : b.butacaKey === payload.resourceKey),
+            )
+            const teniaProducto = previa.productos.find(
+              (p) => (payload.holderId ? p.holderId === payload.holderId : p.productoKey === payload.resourceKey),
+            )
+
+            if (teniaButaca) {
+              cerrarIntento(funcionId, teniaButaca.butacaKey)
+              const restantes = previa.butacas.filter((b) => b.butacaKey !== teniaButaca.butacaKey)
+              const next = { ...previa, butacas: restantes }
+              reservaRef.current = next
+              setReserva(next)
+              guardarReserva(next)
+
+              if (restantes.length === 0) {
+                setAviso(`⏱️ Tu reserva de la butaca ${seatName} fue liberada o expiró. Redirigiendo a la sala...`)
+                setTimeout(() => router.push(`/funcion/${funcionId}`), 2000)
+              } else {
+                setAviso(`⚠️ La butaca ${seatName} fue liberada o expiró. Podés continuar con las restantes.`)
+              }
+            } else if (teniaProducto) {
+              cerrarIntento(funcionId, teniaProducto.productoKey)
+              const next = {
+                ...previa,
+                productos: previa.productos.filter((p) => p.productoKey !== teniaProducto.productoKey),
+              }
+              reservaRef.current = next
+              setReserva(next)
+              guardarReserva(next)
+              setAviso(`⚠️ El producto del candy bar (${teniaProducto.nombre}) fue liberado o expiró.`)
+            }
+          }
+        } catch (err) {
+          console.error('[Checkout SSE] Error procesando evento:', err)
+        }
       },
     })
-  }, [mutateProductos])
+  }, [funcionId, mutateProductos, router])
 
   const reservaRef = useRef(reserva)
   useEffect(() => {

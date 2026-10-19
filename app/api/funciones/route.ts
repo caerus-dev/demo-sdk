@@ -11,7 +11,7 @@ export async function GET() {
     const funciones: FuncionDTO[] = await Promise.all(
       CATALOGO_FUNCIONES.map(async (f) => {
         try {
-          const butacas = await obtenerButacasFuncion(f.id)
+          const { butacas } = await obtenerButacasFuncion(f.id)
           const disponibles = butacas.filter((b) => b.disponible).length
           const total = butacas.length || f.filas * f.columnas.length
           return {

@@ -10,6 +10,7 @@ RUN npm ci
 
 # 2. Compilación de Next.js
 FROM node:22-alpine AS builder
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules

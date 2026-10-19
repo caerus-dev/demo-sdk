@@ -58,3 +58,5 @@ export const caerus: SharedResourceApi = globalForCaerus.__caerusCliente ?? obse
 if (!globalForCaerus.__caerusCliente) {
   globalForCaerus.__caerusCliente = caerus
 }
+
+export * from './operaciones'

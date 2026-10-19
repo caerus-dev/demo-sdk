@@ -27,6 +27,11 @@ import { cn } from '@/lib/utils'
 interface Respuesta {
   funcion: FuncionDTO
   butacas: ButacaDTO[]
+  miEstado?: {
+    reservadas: ButacaReservada[]
+    enCola: ButacaEnFila[]
+    compradas: string[]
+  }
 }
 
 const COLS = ['A', 'B', 'C', 'D', 'E', 'F']
@@ -41,8 +46,9 @@ const VIEW_H = PAD_TOP + ROWS.length * SEAT + (ROWS.length - 1) * GAP + 24
 
 export function SeatMap({ funcionId }: { funcionId: string }) {
   const router = useRouter()
+  const usuarioActual = getUsuarioActual()
   const { data, mutate, isValidating } = useSWR<Respuesta>(
-    `/api/funciones/${funcionId}/butacas`,
+    `/api/funciones/${funcionId}/butacas?usuarioId=${usuarioActual.id}`,
     fetcher,
     { refreshInterval: 2000, refreshWhenHidden: true },
   )
@@ -63,6 +69,38 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     const usuario = getUsuarioActual()
     setCompradasPorMi(new Set(obtenerComprasUsuario(usuario.id, funcionId)))
   }, [funcionId])
+
+  // Reconciliación con el estado autoritativo en Caerus para este usuario
+  useEffect(() => {
+    if (!data?.miEstado) return
+
+    const serverReservadas = data.miEstado.reservadas
+    const serverEnCola = data.miEstado.enCola
+    const serverCompradas = new Set(data.miEstado.compradas)
+
+    setCompradasPorMi(serverCompradas)
+
+    // Detectar si una butaca en fila fue promovida a mi carrito activo
+    const previaFila = reservaRef.current.enFila ?? []
+    previaFila.forEach((espera) => {
+      const ahoraEnCarrito = serverReservadas.find((b) => b.butacaKey === espera.butacaKey)
+      if (ahoraEnCarrito) {
+        const match = /([A-Z]\d+)$/.exec(espera.butacaKey)
+        const seatName = match ? match[1] : espera.butacaKey
+        setAviso(`🎉 ¡Te tocó la butaca ${seatName}! La fila avanzó y la reserva es tuya.`)
+      }
+    })
+
+    const next: ReservaSesion = {
+      ...reservaRef.current,
+      funcionId,
+      butacas: serverReservadas,
+      enFila: serverEnCola,
+    }
+    reservaRef.current = next
+    setReserva(next)
+    guardarReserva(next)
+  }, [data?.miEstado, funcionId])
 
   useEffect(() => {
     if (!data?.butacas) return
@@ -125,8 +163,12 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
             return
           }
 
-          const prefijoFuncion = `funcion${funcionId}_`
-          if (!payload.resourceKey.startsWith(prefijoFuncion)) {
+          const idLimpiado = funcionId.replace(/^funcion/, '')
+          if (
+            !payload.resourceKey.startsWith(`funcion${idLimpiado}_`) &&
+            !payload.resourceKey.startsWith(`funcion${funcionId}_`) &&
+            !payload.resourceKey.startsWith(`${idLimpiado}_`)
+          ) {
             return
           }
 
@@ -134,7 +176,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
           void mutate()
 
           const pKey = payload.resourceKey
-          const match = /funcion.+_([A-Z]\d+)/.exec(pKey)
+          const match = /([A-Z]\d+)$/.exec(pKey)
           const seatName = match ? match[1] : pKey
 
           // 1. Manejo de expiración o liberación remota (Dashboard o abandono)
@@ -233,7 +275,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
 
         actuales.forEach((espera) => {
           const h = map.get(espera.butacaHolderId)
-          const match = /funcion.+_([A-Z]\d+)/.exec(espera.butacaKey)
+          const match = /([A-Z]\d+)$/.exec(espera.butacaKey)
           const seatName = match ? match[1] : espera.butacaKey
 
           if (!h || h.status === 'EXPIRED') {
@@ -243,6 +285,10 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
               enFila: (prev.enFila ?? []).filter((x) => x.butacaKey !== espera.butacaKey),
             }))
             setAviso(`⏱️ Tiempo agotado en la fila: Expiró tu turno de espera para la butaca ${seatName}.`)
+            void mutate()
+          } else if (h.status === 'PENDING') {
+            // ¡Caerus promovió el holder de la cola a PENDING!
+            // Mutamos para que el servidor reconcilie miEstado y pase a la selección activa
             void mutate()
           }
         })
@@ -263,7 +309,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     actuales.forEach((espera) => {
       const b = data.butacas.find((sb) => sb.key === espera.butacaKey)
       if (b && b.estado === 'CONFIRMADA') {
-        const match = /funcion.+_([A-Z]\d+)/.exec(espera.butacaKey)
+        const match = /([A-Z]\d+)$/.exec(espera.butacaKey)
         const seatName = match ? match[1] : espera.butacaKey
         void fetch('/api/holders/liberar', {
           method: 'POST',
@@ -383,15 +429,19 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
 
   async function liberar(butacaKey: string) {
     const target = reservaRef.current.butacas.find((b) => b.butacaKey === butacaKey)
-    if (!target) return
+    const enFilaTarget = (reservaRef.current.enFila ?? []).find((b) => b.butacaKey === butacaKey)
+    const holderId = target?.butacaHolderId ?? enFilaTarget?.butacaHolderId
+    if (!holderId) return
+
     setCargando(butacaKey)
     cerrarIntento(funcionId, butacaKey)
     setSoltando((prev) => new Set(prev).add(butacaKey))
 
-    // Quitar inmediatamente de la selección local para respuesta visual instantánea
+    // Quitar inmediatamente de la selección local o fila para respuesta visual instantánea
     persistir((previa) => ({
       ...previa,
       butacas: previa.butacas.filter((b) => b.butacaKey !== butacaKey),
+      enFila: (previa.enFila ?? []).filter((b) => b.butacaKey !== butacaKey),
     }))
 
     try {
@@ -399,10 +449,13 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          holderIds: [target.butacaHolderId],
+          holderIds: [holderId],
         }),
       })
       publicar('quitar', await res.json().catch(() => null))
+      if (enFilaTarget) {
+        setAviso('Saliste de la lista de espera para esta butaca.')
+      }
     } catch (err) {
       console.warn('[liberar] error al liberar en servidor:', err)
     } finally {
@@ -486,13 +539,14 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                 const key = `funcion${funcionId}_${c}${r}`
                 const butaca = butacasPorKey.get(key)
                 const usuarioActual = getUsuarioActual()
-                const isSel = seleccionadas.has(key)
+                const isSel = seleccionadas.has(key) || Boolean(butaca?.enMiCarrito)
                 const isMiaComprada = Boolean(
-                  butaca &&
-                  butaca.estado === 'CONFIRMADA' &&
-                  (butaca.usuarioId === usuarioActual.id || compradasPorMi.has(key)),
+                  (butaca &&
+                    butaca.estado === 'CONFIRMADA' &&
+                    (butaca.usuarioId === usuarioActual.id || compradasPorMi.has(key))) ||
+                    Boolean(butaca?.compradaPorMi),
                 )
-                const isFila = enFilaSet.has(key)
+                const isFila = !isSel && (enFilaSet.has(key) || Boolean(butaca?.enMiCola))
                 const isSoltando = soltando.has(key)
                 const isConflicto = conflictos.has(key)
                 const isVendidaDefinitiva = Boolean(
@@ -572,19 +626,19 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                         isMiaComprada
                           ? ', compra confirmada'
                           : isSel
-                            ? ', en tu carrito'
+                            ? ', en tu carrito (clic para quitar)'
                             : isFila
-                              ? ', en la fila'
+                              ? ', en tu lista de espera (clic para salir)'
                               : isVendidaDefinitiva
                                 ? ', vendida'
                                 : ocupada
                                   ? ', ocupada'
                                   : ', libre'
                       }`}
-                      aria-disabled={isVendidaDefinitiva || isMiaComprada || isFila || isSoltando}
+                      aria-disabled={isVendidaDefinitiva || isMiaComprada || isSoltando}
                       style={{
                         cursor:
-                          isVendidaDefinitiva || isMiaComprada || isFila || isLoading || isSoltando
+                          isVendidaDefinitiva || isMiaComprada || isLoading || isSoltando
                             ? 'not-allowed'
                             : 'pointer',
                       }}
@@ -604,11 +658,11 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                         if (isSoltando || isLoading) {
                           return
                         }
-                        if (isSel) {
+                        if (isSel || isFila) {
                           void liberar(key)
                           return
                         }
-                        if (!isFila && butaca) {
+                        if (butaca) {
                           onSeatClick(butaca)
                         }
                       }}
@@ -617,13 +671,12 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                           (e.key === 'Enter' || e.key === ' ') &&
                           !isVendidaDefinitiva &&
                           !isMiaComprada &&
-                          !isFila &&
                           !isSoltando &&
                           !isLoading &&
                           butaca
                         ) {
                           e.preventDefault()
-                          if (isSel) {
+                          if (isSel || isFila) {
                             void liberar(key)
                           } else {
                             onSeatClick(butaca)

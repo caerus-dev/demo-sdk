@@ -22,7 +22,7 @@ if (!env.CAERUS_API_KEY) {
   process.exit(1)
 }
 
-const GRUPOS = ['lista_funciones', 'productos', 'funcionhorizonte', 'funcionneon']
+const GRUPOS = ['lista_funciones', 'productos', 'horizonte', 'neon', 'funcionhorizonte', 'funcionneon']
 const deVerdad = process.argv.includes('--borrar')
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
 

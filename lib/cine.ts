@@ -124,7 +124,7 @@ export function catalogoProducto(key: string): ProductoCatalogo | undefined {
 }
 
 export function grupoButacas(idFuncion: string): string {
-  return `funcion${idFuncion}`
+  return idFuncion.replace(/^funcion/, '')
 }
 
 export function butacaKey(idFuncion: string, columna: string, fila: number): string {
@@ -251,10 +251,12 @@ export async function reiniciarCine(): Promise<{ eliminados: number; creados: nu
   // y borrar únicamente las que fueron usadas (availableAmount !== 1 o pendingCount !== 0)
   // o las que quedaron desincronizadas respecto a Postgres.
   for (const f of CATALOGO_FUNCIONES) {
-    const pgResources = await caerus
-      .getResourcesByGroup(grupoButacas(f.id), { pageSize: 200 })
-      .then((res) => res.resources)
-      .catch(() => [] as Resource[])
+    const gKey = grupoButacas(f.id)
+    const legacyGKey = `funcion${f.id}`
+    const pgResources = await Promise.all([
+      caerus.getResourcesByGroup(gKey, { pageSize: 200 }).then((res) => res.resources).catch(() => [] as Resource[]),
+      caerus.getResourcesByGroup(legacyGKey, { pageSize: 200 }).then((res) => res.resources).catch(() => [] as Resource[]),
+    ]).then(([a, b]) => [...a, ...b])
     const enPostgres = new Set(pgResources.map((r) => r.key))
 
     const coords = f.columnas.flatMap((columna) =>
@@ -442,70 +444,219 @@ export interface ButacaDTO {
   estado: 'DISPONIBLE' | 'EN_CARRITO' | 'CONFIRMADA'
   comprador?: string
   usuarioId?: string
+  enMiCarrito?: boolean
+  enMiCola?: boolean
+  compradaPorMi?: boolean
+  holderId?: string
+  expiresAt?: string
 }
 
-export function butacaFromResource(r: Resource, holderConfirmado?: ResourceHolder): ButacaDTO {
+export interface EstadoUsuarioFuncion {
+  reservadas: Array<{
+    butacaKey: string
+    butacaHolderId: string
+    fila: number
+    columna: string
+    precio: number
+    expiresAt: string
+  }>
+  enCola: Array<{
+    butacaKey: string
+    butacaHolderId: string
+    fila: number
+    columna: string
+    precio: number
+    expiresAt?: string
+  }>
+  compradas: string[]
+}
+
+export function butacaFromResource(
+  r: Resource,
+  holderConfirmado?: ResourceHolder,
+  holderPendiente?: ResourceHolder,
+  holdersEnCola?: ResourceHolder[],
+  usuarioId?: string,
+): ButacaDTO {
   const m = r.metadata ?? {}
   const p = parseButacaKey(r.key)
   const fila = Number(m.fila ?? p?.fila ?? 0)
   const precioBase = catalogoFuncion(p?.idFuncion ?? '')?.precioBase ?? 0
   const disponible = r.availableAmount > 0
   const pending = r.pendingCount ?? 0
-  const estado: ButacaDTO['estado'] = disponible
-    ? 'DISPONIBLE'
-    : pending > 0
-    ? 'EN_CARRITO'
-    : 'CONFIRMADA'
+  const estado: ButacaDTO['estado'] = holderConfirmado
+    ? 'CONFIRMADA'
+    : disponible
+      ? 'DISPONIBLE'
+      : pending > 0 || holderPendiente
+        ? 'EN_CARRITO'
+        : 'CONFIRMADA'
 
-  const hMeta = (holderConfirmado?.metadata ?? {}) as Record<string, unknown>
+  const activeHolder = holderConfirmado ?? holderPendiente
+  const hMeta = (activeHolder?.metadata ?? {}) as Record<string, unknown>
+  const hUser = hMeta.usuarioId ? String(hMeta.usuarioId) : undefined
+  const comprador = hMeta.comprador ? String(hMeta.comprador) : undefined
+
+  const enMiCarrito = Boolean(usuarioId && holderPendiente && hUser === usuarioId)
+  const compradaPorMi = Boolean(usuarioId && holderConfirmado && hUser === usuarioId)
+  const enMiCola = Boolean(
+    usuarioId &&
+    holdersEnCola?.some((h) => {
+      const u = (h.metadata as Record<string, unknown> | undefined)?.usuarioId
+      return u === usuarioId
+    }),
+  )
 
   return {
     key: r.key,
     fila,
     columna: String(m.columna ?? p?.columna ?? ''),
     precio: Number(m.precio ?? precioBase),
-    disponible,
+    disponible: estado === 'DISPONIBLE',
     estado,
-    comprador: hMeta.comprador ? String(hMeta.comprador) : undefined,
-    usuarioId: hMeta.usuarioId ? String(hMeta.usuarioId) : undefined,
+    comprador,
+    usuarioId: hUser,
+    enMiCarrito,
+    enMiCola,
+    compradaPorMi,
+    holderId: activeHolder?.id,
+    expiresAt: activeHolder?.expiresAt?.toISOString(),
   }
 }
 
-export async function obtenerButacasFuncion(idFuncion: string): Promise<ButacaDTO[]> {
+export async function obtenerButacasFuncion(
+  idFuncion: string,
+  usuarioId?: string,
+): Promise<{ butacas: ButacaDTO[]; miEstado?: EstadoUsuarioFuncion }> {
   const f = catalogoFuncion(idFuncion)
+  const gKey = grupoButacas(idFuncion)
+  const legacyGKey = `funcion${idFuncion}`
 
-  const [resourcesRes, holdersRes] = await Promise.all([
-    caerus
-      .getResourcesByGroup(grupoButacas(idFuncion), { pageSize: 200 })
-      .catch(() => ({ resources: [] as Resource[] })),
-    caerus
-      .listResourceHolders({ status: 'CONFIRMED', pageSize: 300 })
-      .catch(() => ({ holders: [] as ResourceHolder[] })),
-  ])
+  const [resourcesRes, legacyRes, holdersConfirmados, holdersPendientes, holdersEnCola] =
+    await Promise.all([
+      caerus.getResourcesByGroup(gKey, { pageSize: 200 }).catch(() => ({ resources: [] as Resource[] })),
+      caerus.getResourcesByGroup(legacyGKey, { pageSize: 200 }).catch(() => ({ resources: [] as Resource[] })),
+      caerus.listResourceHolders({ status: 'CONFIRMED', pageSize: 300 }).catch(() => ({ holders: [] as ResourceHolder[] })),
+      caerus.listResourceHolders({ status: 'PENDING', pageSize: 300 }).catch(() => ({ holders: [] as ResourceHolder[] })),
+      caerus.listResourceHolders({ status: 'QUEUED', pageSize: 300 }).catch(() => ({ holders: [] as ResourceHolder[] })),
+    ])
 
   const pgResourcePorKey = new Map<string, Resource>()
   const pgKeyPorId = new Map<string, string>()
-  for (const r of resourcesRes.resources) {
+  for (const r of [...resourcesRes.resources, ...legacyRes.resources]) {
     pgResourcePorKey.set(r.key, r)
     pgKeyPorId.set(r.id, r.key)
   }
 
-  const holderPorButacaKey = new Map<string, ResourceHolder>()
-  for (const h of holdersRes.holders) {
+  const holderConfirmadoPorKey = new Map<string, ResourceHolder>()
+  for (const h of holdersConfirmados.holders) {
     const metaKey = (h.metadata as Record<string, unknown> | undefined)?.butacaKey
     const bKey = typeof metaKey === 'string' && metaKey ? metaKey : pgKeyPorId.get(h.resourceId)
-    if (bKey && !holderPorButacaKey.has(bKey)) {
-      holderPorButacaKey.set(bKey, h)
+    if (bKey && !holderConfirmadoPorKey.has(bKey)) {
+      holderConfirmadoPorKey.set(bKey, h)
+    }
+  }
+
+  const holderPendientePorKey = new Map<string, ResourceHolder>()
+  for (const h of holdersPendientes.holders) {
+    const metaKey = (h.metadata as Record<string, unknown> | undefined)?.butacaKey
+    const bKey = typeof metaKey === 'string' && metaKey ? metaKey : pgKeyPorId.get(h.resourceId)
+    if (bKey && !holderPendientePorKey.has(bKey)) {
+      holderPendientePorKey.set(bKey, h)
+    }
+  }
+
+  const holdersEnColaPorKey = new Map<string, ResourceHolder[]>()
+  for (const h of holdersEnCola.holders) {
+    const metaKey = (h.metadata as Record<string, unknown> | undefined)?.butacaKey
+    const bKey = typeof metaKey === 'string' && metaKey ? metaKey : pgKeyPorId.get(h.resourceId)
+    if (bKey) {
+      const list = holdersEnColaPorKey.get(bKey) ?? []
+      list.push(h)
+      holdersEnColaPorKey.set(bKey, list)
+    }
+  }
+
+  const miEstado: EstadoUsuarioFuncion = {
+    reservadas: [],
+    enCola: [],
+    compradas: [],
+  }
+
+  // Identificar holders del usuario actual para sincronizar su carrito/cola directamente desde Caerus
+  if (usuarioId) {
+    const idLimpiado = idFuncion.replace(/^funcion/, '')
+    for (const h of holdersPendientes.holders) {
+      const hMeta = (h.metadata ?? {}) as Record<string, unknown>
+      const metaKey = hMeta.butacaKey ? String(hMeta.butacaKey) : pgKeyPorId.get(h.resourceId)
+      if (hMeta.usuarioId === usuarioId && metaKey) {
+        const p = parseButacaKey(metaKey)
+        if (
+          p?.idFuncion === idLimpiado ||
+          p?.idFuncion === idFuncion ||
+          metaKey.startsWith(`funcion${idLimpiado}_`) ||
+          metaKey.startsWith(`funcion${idFuncion}_`)
+        ) {
+          miEstado.reservadas.push({
+            butacaKey: metaKey,
+            butacaHolderId: h.id,
+            fila: Number(hMeta.fila ?? p?.fila ?? 1),
+            columna: String(hMeta.columna ?? p?.columna ?? 'A'),
+            precio: Number(hMeta.precio ?? f?.precioBase ?? 0),
+            expiresAt: h.expiresAt.toISOString(),
+          })
+        }
+      }
+    }
+
+    for (const h of holdersEnCola.holders) {
+      const hMeta = (h.metadata ?? {}) as Record<string, unknown>
+      const metaKey = hMeta.butacaKey ? String(hMeta.butacaKey) : pgKeyPorId.get(h.resourceId)
+      if (hMeta.usuarioId === usuarioId && metaKey) {
+        const p = parseButacaKey(metaKey)
+        if (
+          p?.idFuncion === idLimpiado ||
+          p?.idFuncion === idFuncion ||
+          metaKey.startsWith(`funcion${idLimpiado}_`) ||
+          metaKey.startsWith(`funcion${idFuncion}_`)
+        ) {
+          miEstado.enCola.push({
+            butacaKey: metaKey,
+            butacaHolderId: h.id,
+            fila: Number(hMeta.fila ?? p?.fila ?? 1),
+            columna: String(hMeta.columna ?? p?.columna ?? 'A'),
+            precio: Number(hMeta.precio ?? f?.precioBase ?? 0),
+            expiresAt: h.expiresAt?.toISOString(),
+          })
+        }
+      }
+    }
+
+    for (const h of holdersConfirmados.holders) {
+      const hMeta = (h.metadata ?? {}) as Record<string, unknown>
+      const metaKey = hMeta.butacaKey ? String(hMeta.butacaKey) : pgKeyPorId.get(h.resourceId)
+      if (hMeta.usuarioId === usuarioId && metaKey) {
+        miEstado.compradas.push(metaKey)
+      }
     }
   }
 
   if (!f) {
-    return resourcesRes.resources
-      .map((r) => butacaFromResource(r, holderPorButacaKey.get(r.key)))
+    const butacas = resourcesRes.resources
+      .map((r) =>
+        butacaFromResource(
+          r,
+          holderConfirmadoPorKey.get(r.key),
+          holderPendientePorKey.get(r.key),
+          holdersEnColaPorKey.get(r.key),
+          usuarioId,
+        ),
+      )
       .sort((a, b) => {
         if (a.columna !== b.columna) return a.columna.localeCompare(b.columna)
         return a.fila - b.fila
       })
+    return { butacas, miEstado: usuarioId ? miEstado : undefined }
   }
 
   const coords = f.columnas.flatMap((columna) =>
@@ -526,12 +677,11 @@ export async function obtenerButacasFuncion(idFuncion: string): Promise<ButacaDT
     } else if (
       redisRes.availableAmount === 0 &&
       (redisRes.pendingCount ?? 0) === 0 &&
-      !holderPorButacaKey.has(item.key)
+      !holderConfirmadoPorKey.has(item.key) &&
+      !holderPendientePorKey.has(item.key)
     ) {
       const pgRes = pgResourcePorKey.get(item.key)
       const haceMs = Date.now() - (redisRes.updatedAt?.getTime() ?? 0)
-      // Si la butaca en Redis figura en 0 sin pendientes ni compra confirmada,
-      // y en Postgres no existe o figura libre (desfase de un reset previo), auto-repararla:
       if (!pgRes || (pgRes.availableAmount > 0 && haceMs > 4000)) {
         try {
           await caerus.deleteResource(item.key)
@@ -549,7 +699,7 @@ export async function obtenerButacasFuncion(idFuncion: string): Promise<ButacaDT
     }
   })
 
-  return coords
+  const butacas = coords
     .map((item) => {
       const r = resultados.get(item.key)
       if (!r) {
@@ -562,12 +712,20 @@ export async function obtenerButacasFuncion(idFuncion: string): Promise<ButacaDT
           estado: 'DISPONIBLE' as const,
         }
       }
-      return butacaFromResource(r, holderPorButacaKey.get(item.key))
+      return butacaFromResource(
+        r,
+        holderConfirmadoPorKey.get(item.key),
+        holderPendientePorKey.get(item.key),
+        holdersEnColaPorKey.get(item.key),
+        usuarioId,
+      )
     })
     .sort((a, b) => {
       if (a.columna !== b.columna) return a.columna.localeCompare(b.columna)
       return a.fila - b.fila
     })
+
+  return { butacas, miEstado: usuarioId ? miEstado : undefined }
 }
 
 export interface ProductoDTO {
