@@ -78,7 +78,11 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
     const serverEnCola = data.miEstado.enCola
     const serverCompradas = new Set(data.miEstado.compradas)
 
-    setCompradasPorMi(serverCompradas)
+    const usuario = getUsuarioActual()
+    const misComprasLocales = new Set(obtenerComprasUsuario(usuario.id, funcionId))
+    const misComprasTotales = new Set([...serverCompradas, ...misComprasLocales])
+
+    setCompradasPorMi(misComprasTotales)
 
     // Detectar si una butaca en fila fue promovida a mi carrito activo
     const previaFila = reservaRef.current.enFila ?? []
@@ -91,10 +95,29 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
       }
     })
 
+    // Descartar de las reservas cualquier butaca que ya haya sido confirmada/comprada
+    // Esto asegura que al volver de pagar rápido, la butaca confirmada desaparezca del carrito inmediatamente
+    const ahora = Date.now()
+    const serverReservadasLimpias = serverReservadas.filter(
+      (b) => !misComprasTotales.has(b.butacaKey),
+    )
+    const serverKeys = new Set(serverReservadasLimpias.map((b) => b.butacaKey))
+    const localesVivas = (reservaRef.current.butacas || []).filter((b) => {
+      if (serverKeys.has(b.butacaKey)) return false
+      if (new Date(b.expiresAt).getTime() <= ahora) return false
+      if (soltando.has(b.butacaKey)) return false
+      if (misComprasTotales.has(b.butacaKey)) return false
+      const butacaDTO = data?.butacas?.find((sb) => sb.key === b.butacaKey)
+      if (butacaDTO && butacaDTO.estado === 'CONFIRMADA') {
+        return false
+      }
+      return true
+    })
+
     const next: ReservaSesion = {
       ...reservaRef.current,
       funcionId,
-      butacas: serverReservadas,
+      butacas: [...serverReservadasLimpias, ...localesVivas],
       enFila: serverEnCola,
     }
     reservaRef.current = next
@@ -200,6 +223,35 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                   : `🔓 Telemetría: La butaca ${seatName} fue liberada y vuelve a estar libre.`,
               )
             }
+
+            // Actualizar optimísticamente SWR ante evento SSE de liberación/expiración
+            void mutate(
+              (current) => {
+                if (!current) return current
+                return {
+                  ...current,
+                  butacas: current.butacas.map((b) =>
+                    b.key === pKey
+                      ? {
+                          ...b,
+                          disponible: true,
+                          estado: 'DISPONIBLE' as const,
+                          enMiCarrito: false,
+                          holderId: undefined,
+                        }
+                      : b,
+                  ),
+                  miEstado: current.miEstado
+                    ? {
+                        ...current.miEstado,
+                        reservadas: current.miEstado.reservadas.filter((b) => b.butacaKey !== pKey),
+                        enCola: current.miEstado.enCola.filter((b) => b.butacaKey !== pKey),
+                      }
+                    : undefined,
+                }
+              },
+              { revalidate: true },
+            )
           }
 
           // 2. Promoción reactiva de la cola (QUEUED -> PENDING)
@@ -444,6 +496,35 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
       enFila: (previa.enFila ?? []).filter((b) => b.butacaKey !== butacaKey),
     }))
 
+    // Optimistic update inmediato en la caché de SWR para que butaca.disponible = true y enMiCarrito = false
+    void mutate(
+      (current) => {
+        if (!current) return current
+        return {
+          ...current,
+          butacas: current.butacas.map((b) =>
+            b.key === butacaKey
+              ? {
+                  ...b,
+                  disponible: true,
+                  estado: 'DISPONIBLE' as const,
+                  enMiCarrito: false,
+                  holderId: undefined,
+                }
+              : b,
+          ),
+          miEstado: current.miEstado
+            ? {
+                ...current.miEstado,
+                reservadas: current.miEstado.reservadas.filter((b) => b.butacaKey !== butacaKey),
+                enCola: current.miEstado.enCola.filter((b) => b.butacaKey !== butacaKey),
+              }
+            : undefined,
+        }
+      },
+      { revalidate: false },
+    )
+
     try {
       const res = await fetch('/api/holders/liberar', {
         method: 'POST',
@@ -539,7 +620,8 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                 const key = `funcion${funcionId}_${c}${r}`
                 const butaca = butacasPorKey.get(key)
                 const usuarioActual = getUsuarioActual()
-                const isSel = seleccionadas.has(key) || Boolean(butaca?.enMiCarrito)
+                const isSoltando = soltando.has(key)
+                const isSel = !isSoltando && (seleccionadas.has(key) || Boolean(butaca?.enMiCarrito))
                 const isMiaComprada = Boolean(
                   (butaca &&
                     butaca.estado === 'CONFIRMADA' &&
@@ -547,7 +629,6 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                     Boolean(butaca?.compradaPorMi),
                 )
                 const isFila = !isSel && (enFilaSet.has(key) || Boolean(butaca?.enMiCola))
-                const isSoltando = soltando.has(key)
                 const isConflicto = conflictos.has(key)
                 const isVendidaDefinitiva = Boolean(
                   butaca && butaca.estado === 'CONFIRMADA' && !isSel && !isMiaComprada,
@@ -572,7 +653,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                   fill = 'color-mix(in oklch, var(--destructive) 35%, var(--card))'
                   stroke = 'var(--destructive)'
                 } else if (isSoltando) {
-                  fill = 'color-mix(in oklch, var(--secondary) 60%, var(--card))'
+                  fill = 'var(--secondary)'
                   stroke = 'var(--border)'
                 } else if (isMiaComprada) {
                   fill = '#10b981'
@@ -709,7 +790,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
                                     : 'var(--muted-foreground)'
                       }
                     >
-                      {isVendidaDefinitiva ? '✕' : isLoading || isSoltando ? '···' : `${c}${r}`}
+                      {isVendidaDefinitiva ? '✕' : isLoading ? '···' : `${c}${r}`}
                     </text>
                   </g>
                 )

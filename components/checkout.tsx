@@ -241,7 +241,10 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         | null
       publicar('candy bar', json)
       if (res.status === 409) {
-        setAviso(`❌ Error de contención (ConflictError): Pediste ${cantidad} unidades, pero solo hay ${producto.disponibles} disponibles. El motor Caerus opera de forma atómica (todo o nada).`)
+        void mutateProductos()
+        setAviso(
+          `No hay suficiente stock disponible para agregar ${cantidad} ${cantidad === 1 ? 'unidad' : 'unidades'}.`,
+        )
         return
       }
       if (!res.ok || !json) {

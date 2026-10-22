@@ -699,6 +699,32 @@ export async function obtenerButacasFuncion(
     }
   })
 
+  // Blindaje contra lag de RabbitMQ/Postgres:
+  // Si Redis (fuente de verdad atómica en tiempo real) confirma que pendingCount === 0,
+  // NO existe ninguna reserva pendiente activa en Redis (el recurso está libre o ya fue confirmado/comprado).
+  // Por ende, cualquier holder "PENDING" que devuelva Postgres es obsoleto (stale).
+  for (const [key, r] of resultados.entries()) {
+    if ((r.pendingCount ?? 0) === 0) {
+      holderPendientePorKey.delete(key)
+    }
+  }
+
+  if (miEstado.reservadas.length > 0) {
+    const pendientesReales: typeof miEstado.reservadas = []
+    for (const h of miEstado.reservadas) {
+      const r = resultados.get(h.butacaKey)
+      if (r && (r.pendingCount ?? 0) === 0) {
+        // Si availableAmount === 0 y pendingCount === 0, significa que el usuario acaba de confirmarla
+        if (r.availableAmount === 0 && !miEstado.compradas.includes(h.butacaKey)) {
+          miEstado.compradas.push(h.butacaKey)
+        }
+        continue
+      }
+      pendientesReales.push(h)
+    }
+    miEstado.reservadas = pendientesReales
+  }
+
   const butacas = coords
     .map((item) => {
       const r = resultados.get(item.key)
