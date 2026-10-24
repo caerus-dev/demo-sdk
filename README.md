@@ -20,7 +20,11 @@ dashboard, no una línea de esta app.
 
 ## Publicada
 
-**https://caerus-demo.vercel.app** — repo `caerus-dev/demo-sdk`, cada push a `main` redeploya solo.
+**https://caerus-cine.vercel.app** — proyecto `caerus-cine` en la cuenta de Vercel de Caerus,
+desde el repo `caerus-dev/demo-sdk`. Cada push a `main` redeploya solo.
+
+En el dashboard de Caerus usa la aplicación `Demos`, entorno `dev`, con las cuatro plantillas de
+más abajo.
 
 Las variables de entorno viven en Vercel, no en el repo. El Backoffice queda en **solo
 lectura** salvo que cargues el token de `BACKOFFICE_TOKEN`: reservar y comprar están
