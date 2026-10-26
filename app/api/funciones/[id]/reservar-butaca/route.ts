@@ -11,10 +11,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     await ensureSeed()
     const { id } = await params
-    const { butacaKey, sessionId, intento } = (await req.json()) as {
+    const { butacaKey, sessionId, intento, precio, fila, columna } = (await req.json()) as {
       butacaKey?: string
       sessionId?: string
       intento?: string
+      precio?: number
+      fila?: number
+      columna?: string
     }
     if (!esClaveValida(butacaKey) || !sessionId) {
       return NextResponse.json(
@@ -44,6 +47,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           funcionId: id,
           usuarioId: sessionId,
           comprador: usuarioNombre,
+          ...(precio !== undefined ? { precio } : {}),
+          ...(fila !== undefined ? { fila } : {}),
+          ...(columna !== undefined ? { columna } : {}),
         }),
       })
       exigirHolderVivo(holder, butacaKey)

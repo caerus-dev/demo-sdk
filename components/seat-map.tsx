@@ -102,17 +102,22 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
       (b) => !misComprasTotales.has(b.butacaKey),
     )
     const serverKeys = new Set(serverReservadasLimpias.map((b) => b.butacaKey))
-    const localesVivas = (reservaRef.current.butacas || []).filter((b) => {
-      if (serverKeys.has(b.butacaKey)) return false
-      if (new Date(b.expiresAt).getTime() <= ahora) return false
-      if (soltando.has(b.butacaKey)) return false
-      if (misComprasTotales.has(b.butacaKey)) return false
-      const butacaDTO = data?.butacas?.find((sb) => sb.key === b.butacaKey)
-      if (butacaDTO && butacaDTO.estado === 'CONFIRMADA') {
-        return false
-      }
-      return true
-    })
+    const localesVivas = (reservaRef.current.butacas || [])
+      .filter((b) => {
+        if (serverKeys.has(b.butacaKey)) return false
+        if (new Date(b.expiresAt).getTime() <= ahora) return false
+        if (soltando.has(b.butacaKey)) return false
+        if (misComprasTotales.has(b.butacaKey)) return false
+        const butacaDTO = data?.butacas?.find((sb) => sb.key === b.butacaKey)
+        if (butacaDTO && butacaDTO.estado === 'CONFIRMADA') {
+          return false
+        }
+        return true
+      })
+      .map((b) => {
+        const butacaDTO = data?.butacas?.find((sb) => sb.key === b.butacaKey)
+        return butacaDTO ? { ...b, precio: butacaDTO.precio } : b
+      })
 
     const next: ReservaSesion = {
       ...reservaRef.current,
@@ -426,6 +431,9 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
           butacaKey: butaca.key,
           sessionId: getSessionId(),
           intento: intentoDe(funcionId, butaca.key),
+          precio: butaca.precio,
+          fila: butaca.fila,
+          columna: butaca.columna,
         }),
       })
 

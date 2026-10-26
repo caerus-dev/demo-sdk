@@ -586,38 +586,9 @@ export function Checkout({ funcionId }: { funcionId: string }) {
               {formatPrecio(total)}
             </span>
           </div>
-          <div className="mt-5">
-            <div className="mb-1.5 flex items-center justify-between">
-              <label htmlFor="comprador" className="block text-sm font-medium text-foreground">
-                Nombre del comprador
-              </label>
-              <span className="text-[11px] text-muted-foreground">Elegí o escribí</span>
-            </div>
-            <input
-              id="comprador"
-              type="text"
-              value={comprador}
-              onChange={(e) => setComprador(e.target.value)}
-              placeholder="Ej. Ana García"
-              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
-            />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {['Ana García', 'Beto Pérez', 'Carlos Gómez', 'Diana Prince'].map((nom) => (
-                <button
-                  key={nom}
-                  type="button"
-                  onClick={() => setComprador(nom)}
-                  className={cn(
-                    "rounded-md border px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer",
-                    comprador === nom
-                      ? "border-primary bg-primary/10 text-primary font-semibold"
-                      : "border-border/70 bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  )}
-                >
-                  {nom}
-                </button>
-              ))}
-            </div>
+          <div className="mt-5 rounded-lg border border-border bg-secondary/40 px-3.5 py-2.5 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Comprador</span>
+            <span className="font-semibold text-foreground">{comprador}</span>
           </div>
           <button
             type="button"
