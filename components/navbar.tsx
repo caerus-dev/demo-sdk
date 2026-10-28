@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Clapperboard, SlidersHorizontal } from 'lucide-react'
 import { NavbarUser } from '@/components/navbar-user'
+import { FullscreenToggle } from '@/components/fullscreen-toggle'
 
 export function Navbar() {
   return (
@@ -28,6 +29,7 @@ export function Navbar() {
             <SlidersHorizontal className="size-4" aria-hidden="true" />
             Backoffice
           </Link>
+          <FullscreenToggle />
         </div>
       </div>
     </header>
