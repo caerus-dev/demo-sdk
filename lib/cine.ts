@@ -258,6 +258,7 @@ export async function reiniciarCine(): Promise<{ eliminados: number; creados: nu
       caerus.getResourcesByGroup(legacyGKey, { pageSize: 200 }).then((res) => res.resources).catch(() => [] as Resource[]),
     ]).then(([a, b]) => [...a, ...b])
     const enPostgres = new Set(pgResources.map((r) => r.key))
+    const pgPorKey = new Map(pgResources.map((r) => [r.key, r] as const))
 
     const coords = f.columnas.flatMap((columna) =>
       Array.from({ length: f.filas }, (_, i) => ({
@@ -268,6 +269,7 @@ export async function reiniciarCine(): Promise<{ eliminados: number; creados: nu
     )
 
     const paraRecrear: Array<{ columna: string; fila: number; key: string; existiaEnRedis: boolean }> = []
+    const paraRestaurarMetadata: Array<{ columna: string; fila: number; key: string }> = []
 
     await enTandas(coords, 15, async (item) => {
       const redisRes = await caerus.getResource(item.key).catch(() => null)
@@ -281,8 +283,29 @@ export async function reiniciarCine(): Promise<{ eliminados: number; creados: nu
         !enPostgres.has(item.key)
       ) {
         paraRecrear.push({ ...item, existiaEnRedis: true })
+        return
+      }
+      // Butaca libre pero con precio editado (ej. desde el dashboard): restaurar metadatos del JSON
+      if (METADATA_HABILITADA) {
+        const precioActual = (pgPorKey.get(item.key)?.metadata ?? redisRes.metadata)?.precio
+        if (Number(precioActual) !== f.precioBase) {
+          paraRestaurarMetadata.push(item)
+        }
       }
     })
+
+    if (paraRestaurarMetadata.length > 0) {
+      await enTandas(paraRestaurarMetadata, 10, async (item) => {
+        try {
+          await caerus.updateResource(item.key, 0, {
+            metadata: { fila: item.fila, columna: item.columna, precio: f.precioBase },
+            idempotencyKey: `reset-meta:${item.key}:${Date.now()}`,
+          })
+        } catch (error) {
+          console.warn(`[reset] No se pudo restaurar metadata de ${item.key}:`, error)
+        }
+      })
+    }
 
     const paraBorrar = paraRecrear.filter((x) => x.existiaEnRedis)
     if (paraBorrar.length > 0) {
@@ -330,9 +353,15 @@ export async function reiniciarCine(): Promise<{ eliminados: number; creados: nu
         creados++
       } else {
         const delta = p.stock - actual.availableAmount
-        if (delta !== 0) {
+        const m = actual.metadata ?? {}
+        const metadataDesviada =
+          METADATA_HABILITADA &&
+          (Number(m.precio) !== p.precio || m.nombre !== p.nombre || m.tamanio !== p.tamanio)
+        if (delta !== 0 || metadataDesviada) {
           await caerus.updateResource(p.key, delta, {
             idempotencyKey: `reset:${p.key}:${Date.now()}`,
+            // Restaura también nombre/tamaño/precio del JSON (solo si la demo usa metadata)
+            ...meta({ nombre: p.nombre, tamanio: p.tamanio, precio: p.precio }),
           })
         }
       }
