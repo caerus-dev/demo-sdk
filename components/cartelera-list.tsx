@@ -16,7 +16,7 @@ export function CarteleraList() {
   if (error) {
     return (
       <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-        No se pudo cargar la cartelera. Reintentá en unos segundos.
+        No se pudo cargar la cartelera. Reintenta en unos segundos.
       </p>
     )
   }
@@ -32,7 +32,7 @@ export function CarteleraList() {
   if (data.funciones.length === 0) {
     return (
       <p className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
-        No hay funciones cargadas. Creá una desde el{' '}
+        No hay funciones cargadas. Crea una desde el{' '}
         <Link href="/backoffice" className="text-primary underline-offset-4 hover:underline">
           Backoffice
         </Link>

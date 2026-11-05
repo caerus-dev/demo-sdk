@@ -452,7 +452,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
         return
       }
       if (!res.ok || !json) {
-        setAviso('No pudimos reservar la butaca. Reintentá en un momento.')
+        setAviso('No pudimos reservar la butaca. Reintenta en un momento.')
         return
       }
       if (json.estado === 'EN_FILA') {
@@ -481,7 +481,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
       persistir((previa) => ({ ...previa, butacas: [...previa.butacas, nueva] }))
       void mutate()
     } catch {
-      setAviso('No pudimos reservar la butaca. Revisá tu conexión.')
+      setAviso('No pudimos reservar la butaca. Revisa tu conexión.')
     } finally {
       setCargando(null)
     }
@@ -851,7 +851,7 @@ export function SeatMap({ funcionId }: { funcionId: string }) {
 
           {reserva.butacas.length === 0 && enFila.length === 0 ? (
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Tocá una butaca libre para reservarla al instante. El temporizador es gestionado por Caerus; si expira,
+              Toca una butaca libre para reservarla al instante. El temporizador es gestionado por Caerus; si expira,
               el motor emite un Webhook y vuelve a estar libre automáticamente.
             </p>
           ) : reserva.butacas.length === 0 ? null : (

@@ -74,7 +74,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
             guardarReserva(next)
 
             if (butacasVigentes.length === 0) {
-              setAviso('Tu reserva de butacas ya no está vigente en el sistema. Volvé a elegirlas.')
+              setAviso('Tu reserva de butacas ya no está vigente en el sistema. Vuelve a elegirlas.')
             } else {
               setAviso('Algunas de tus butacas ya no estaban vigentes y fueron removidas del carrito.')
             }
@@ -125,7 +125,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
                 setAviso(`⏱️ Tu reserva de la butaca ${seatName} fue liberada o expiró. Redirigiendo a la sala...`)
                 setTimeout(() => router.push(`/funcion/${funcionId}`), 2000)
               } else {
-                setAviso(`⚠️ La butaca ${seatName} fue liberada o expiró. Podés continuar con las restantes.`)
+                setAviso(`⚠️ La butaca ${seatName} fue liberada o expiró. Puedes continuar con las restantes.`)
               }
             } else if (teniaProducto) {
               cerrarIntento(funcionId, teniaProducto.productoKey)
@@ -207,7 +207,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         body: JSON.stringify({ holderIds: vivos }),
       }).catch(() => {})
     }
-    setAviso('Se venció el tiempo de la reserva. Volvé a elegir tus butacas.')
+    setAviso('Se venció el tiempo de la reserva. Vuelve a elegir tus butacas.')
     limpiarReserva(funcionId)
     setTimeout(() => router.push(`/funcion/${funcionId}`), 1800)
   }, [funcionId, ok, reserva, router])
@@ -248,7 +248,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         return
       }
       if (!res.ok || !json) {
-        setAviso('No pudimos agregar el producto. Reintentá.')
+        setAviso('No pudimos agregar el producto. Reintenta.')
         return
       }
       const nuevo: ProductoReservado = {
@@ -262,7 +262,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
       }
       persistir((previa) => ({ ...previa, productos: [...previa.productos, nuevo] }))
     } catch {
-      setAviso('No pudimos agregar el producto. Revisá tu conexión.')
+      setAviso('No pudimos agregar el producto. Revisa tu conexión.')
     } finally {
       setTrabajando(null)
     }
@@ -329,7 +329,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
       }))
       setAviso(
         datos.extendidos === holderIds.length
-          ? 'Listo, tenés dos minutos más.'
+          ? 'Listo, tienes dos minutos más.'
           : 'Te dimos más tiempo, pero alguna de tus reservas ya no estaba vigente.',
       )
     } finally {
@@ -339,7 +339,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
 
   async function pagar() {
     if (!comprador.trim()) {
-      setAviso('Ingresá el nombre del comprador para continuar.')
+      setAviso('Ingresa el nombre del comprador para continuar.')
       return
     }
     setAviso(null)
@@ -364,14 +364,14 @@ export function Checkout({ funcionId }: { funcionId: string }) {
         setAviso(
           detalle.confirmados
             ? `Una de tus reservas venció justo al confirmar. Las otras ${detalle.confirmados} quedaron a tu nombre.`
-            : 'Alguna de tus reservas venció mientras pagabas. Volvé a elegir tus butacas.',
+            : 'Alguna de tus reservas venció mientras pagabas. Vuelve a elegir tus butacas.',
         )
         limpiarReserva(funcionId)
         setTimeout(() => router.push(`/funcion/${funcionId}`), detalle.confirmados ? 4000 : 2000)
         return
       }
       if (!res.ok) {
-        setAviso('No pudimos confirmar el pago. Reintentá.')
+        setAviso('No pudimos confirmar el pago. Reintenta.')
         return
       }
 
@@ -385,7 +385,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
       setOk(true)
       limpiarReserva(funcionId)
     } catch {
-      setAviso('No pudimos confirmar el pago. Revisá tu conexión.')
+      setAviso('No pudimos confirmar el pago. Revisa tu conexión.')
     } finally {
       setPagando(false)
     }
@@ -440,7 +440,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
           </h2>
           {sinReserva ? (
             <p className="text-sm text-muted-foreground">
-              No tenés butacas reservadas.{' '}
+              No tienes butacas reservadas.{' '}
               <button
                 type="button"
                 onClick={() => router.push(`/funcion/${funcionId}`)}
@@ -477,7 +477,7 @@ export function Checkout({ funcionId }: { funcionId: string }) {
             Candy bar
           </h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Sumá algo para la función. Cada producto se reserva del stock compartido.
+            Suma algo para la función. Cada producto se reserva del stock compartido.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             {(productosData?.productos ?? []).map((p) => {

@@ -32,7 +32,7 @@ export function RegistroCaerus({ className }: { className?: string }) {
       </header>
       {llamadas.length === 0 ? (
         <p className="px-4 py-6 text-sm leading-relaxed text-muted-foreground">
-          Tocá una butaca. Acá vas a ver la llamada exacta que el servidor le hace al SDK y
+          Toca una butaca. Aquí vas a ver la llamada exacta que el servidor le hace al SDK y
           lo que responde el motor: la reserva, el conflicto cuando otro se te adelanta, el
           vencimiento y la confirmación.
         </p>

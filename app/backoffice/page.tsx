@@ -13,7 +13,7 @@ export default function BackofficePage() {
           Backoffice
         </h1>
         <p className="mt-1 text-muted-foreground text-pretty">
-          Administrá funciones, stock del candy bar y el estado general de la sala para la demo.
+          Administra funciones, stock del candy bar y el estado general de la sala para la demo.
         </p>
       </header>
       <Backoffice />

@@ -263,7 +263,7 @@ function StockCandy() {
     const val = deltas[productoKey]?.trim()
     const deltaNum = Number(val)
     if (!val || !Number.isInteger(deltaNum) || deltaNum === 0) {
-      alert('Ingresá una cantidad entera positiva o negativa (ej. 5 o -2)')
+      alert('Ingresa una cantidad entera positiva o negativa (ej. 5 o -2)')
       return
     }
     setTrabajando(`${productoKey}:stock`)
@@ -314,7 +314,7 @@ function StockCandy() {
         Stock del candy bar
       </h2>
       <p className="mb-4 text-sm text-muted-foreground">
-        Actualizá el stock con updateResource según un delta (sumar o restar), o eliminá el producto del motor.
+        Actualiza el stock con updateResource según un delta (sumar o restar), o elimina el producto del motor.
       </p>
       <ul className="flex flex-col gap-2">
         {productos.map((p) => {
@@ -423,7 +423,7 @@ function CampoToken() {
     >
       <KeyRound className={cn('size-4', bloqueado ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
       <span className={bloqueado ? 'text-primary' : 'text-muted-foreground'}>
-        {bloqueado ? 'Solo lectura: cargá el token para poder modificar' : 'Token del Backoffice'}
+        {bloqueado ? 'Solo lectura: carga el token para poder modificar' : 'Token del Backoffice'}
       </span>
       <input
         type="password"
@@ -484,7 +484,7 @@ export function Backoffice() {
             Estado de la sala (Demo)
           </h2>
           <p className="text-sm text-muted-foreground">
-            Reiniciá las butacas y el stock del candy bar a los valores iniciales de config/sala.json.
+            Reinicia las butacas y el stock del candy bar a los valores iniciales de config/sala.json.
           </p>
         </div>
         <BotonResetearTodo />

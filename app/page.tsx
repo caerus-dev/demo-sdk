@@ -11,8 +11,8 @@ export default function Page() {
           Cartelera
         </h1>
         <p className="mt-3 max-w-2xl text-pretty leading-relaxed text-muted-foreground">
-          Elegí una función y reservá tus butacas. Las reservas duran unos minutos y se
-          liberan solas si nadie paga. Abrí esta demo en dos pestañas y mirá cómo se ocupan
+          Elige una función y reserva tus butacas. Las reservas duran unos minutos y se
+          liberan solas si nadie paga. Abre esta demo en dos pestañas y mira cómo se ocupan
           las butacas en tiempo real, y qué pasa cuando dos personas quieren la misma.
         </p>
       </section>

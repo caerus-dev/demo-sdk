@@ -17,7 +17,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ id: s
         Volver al mapa de butacas
       </Link>
       <h1 className="mb-6 font-display text-3xl font-bold text-foreground text-balance">
-        Finalizá tu compra
+        Finaliza tu compra
       </h1>
       <IdentidadUsuario soloLectura className="mb-6" />
       <Checkout funcionId={id} />
