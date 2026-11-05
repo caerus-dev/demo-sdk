@@ -277,10 +277,14 @@ export async function reiniciarCine(): Promise<{ eliminados: number; creados: nu
         paraRecrear.push({ ...item, existiaEnRedis: false })
         return
       }
+      const pgRes = pgPorKey.get(item.key)
       if (
         redisRes.availableAmount !== 1 ||
         (redisRes.pendingCount ?? 0) !== 0 ||
-        !enPostgres.has(item.key)
+        !pgRes ||
+        // Proyección de Postgres desincronizada (ej. contadores negativos por eventos viejos)
+        pgRes.availableAmount !== 1 ||
+        (pgRes.pendingCount ?? 0) !== 0
       ) {
         paraRecrear.push({ ...item, existiaEnRedis: true })
         return
