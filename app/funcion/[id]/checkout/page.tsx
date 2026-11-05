@@ -19,7 +19,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ id: s
       <h1 className="mb-6 font-display text-3xl font-bold text-foreground text-balance">
         Finalizá tu compra
       </h1>
-      <IdentidadUsuario className="mb-6" />
+      <IdentidadUsuario soloLectura className="mb-6" />
       <Checkout funcionId={id} />
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <RegistroCaerus />
